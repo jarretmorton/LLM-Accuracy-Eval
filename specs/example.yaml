@@ -1,0 +1,72 @@
+# Example eval spec for llm-accuracy-eval.
+#
+# This spec reproduces a slice of the sports-league experiment from the
+# LessWrong post the harness is built around. Run it with:
+#
+#   llm-accuracy-eval run specs/example.yaml
+#
+# The spec is intentionally small. The goal is to demonstrate the format,
+# not to reproduce the full 640-query result.
+
+name: example-sports-leagues
+description: >
+  Two sports-league topics, two models, twenty runs each. Includes the
+  coverage-check step from the LessWrong post: each topic has a secondary
+  question that must be answered with web search disabled before the
+  primary stability measurement is trusted.
+
+# Models to run against. Strings are passed verbatim to the provider.
+models:
+  - claude-opus-4-5-20251101
+  - gpt-5-2
+
+# Number of times to run each primary query, per model, per topic.
+runs: 20
+
+# Sampling temperature. 0 trivialises stability and is rejected.
+temperature: 0.7
+
+# Grader: exact | judge | none.
+# `exact` — string equality with ground_truth (case-insensitive, whitespace-trimmed).
+# `judge` — an LLM-as-judge call; requires `judge_model`.
+# `none`  — measure stability only; do not compute accuracy.
+grader: exact
+
+topics:
+
+  - name: nba-2024-champion
+    primary_query: >
+      Who won the 2024 NBA Finals? Answer with the team name only.
+    coverage_check:
+      query: >
+        Without searching the web, name three players who played in the
+        2024 NBA Finals.
+      # If the response contains any of these patterns, the model is
+      # treated as outside training coverage for this topic and stability
+      # numbers will be reported as unfiltered.
+      refusal_patterns:
+        - "I cannot"
+        - "I don't have"
+        - "without access"
+        - "can't verify"
+    ground_truth: "Boston Celtics"
+
+  - name: epl-2023-24-champion
+    primary_query: >
+      Which club won the 2023-24 English Premier League? Answer with the
+      club name only.
+    coverage_check:
+      query: >
+        Without searching the web, name the manager of the club that won
+        the 2023-24 English Premier League.
+      refusal_patterns:
+        - "I cannot"
+        - "I don't have"
+        - "without access"
+        - "can't verify"
+    ground_truth: "Manchester City"
+
+# Output destination. JSONL by default; one line per query plus a summary.
+output:
+  path: results/example.jsonl
+  format: jsonl
