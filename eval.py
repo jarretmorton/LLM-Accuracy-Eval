@@ -2,6 +2,7 @@
 
 # importlib lets us check if a package is installed before trying to import it
 import importlib.util
+import time
 
 # Auto-install the anthropic package if it's not already present
 if importlib.util.find_spec("anthropic") is None:
@@ -86,7 +87,6 @@ def chat(messages, system=None, temperature=1.0, stop_sequences=[], web_search=F
 # Standard library imports used in this section
 import json
 import os
-import time
 from datetime import date
 
 # Always write results next to this script, regardless of where Python is invoked from
