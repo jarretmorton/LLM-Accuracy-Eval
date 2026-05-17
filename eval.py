@@ -103,13 +103,12 @@ for league in leagues:
     league_slug = league.replace(" ", "_")
     runs = []
 
+    query = f"What was the total playing time in hours for the {league} in the season ending in {year}? Include post season playoffs, but don't include any overtime."
+
     for i in range(1, n + 1):
         # Fresh message history each run — no context carried over between runs
         messages = []
-        add_user_message(
-            messages,
-            f"What was the total playing time in hours for the {league} in the season ending in {year}? Include post season playoffs, but don't include any overtime."
-        )
+        add_user_message(messages, query)
 
         # web_search=True lets Claude look up current data rather than relying on training knowledge
         answer = chat(messages, system="Make sure the last number in your response is the final answer in hours", temperature=1.0, web_search=True)
@@ -118,10 +117,10 @@ for league in leagues:
 
         # Pause between runs to stay within the API's token-per-minute rate limit
         if i < n:
-            time.sleep(30)
+            time.sleep(40)
 
     # Filename encodes all the key variables so results are self-identifying on disk
     filename = os.path.join(results_dir, f"{model}_{league_slug}_{year}_{date.today()}_{n}runs.json")
     with open(filename, "w") as f:
-        json.dump({"model": model, "league": league, "year": year, "n": n, "runs": runs}, f, indent=2)
+        json.dump({"model": model, "query": query, "league": league, "year": year, "n": n, "runs": runs}, f, indent=2)
     print(f"Results written → {filename}")
