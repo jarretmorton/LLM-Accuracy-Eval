@@ -70,11 +70,13 @@ def chat(messages, system=None, temperature=1.0, stop_sequences=[], web_search=F
 
 # --- Query --------------------------
 
+# Standard library imports used in this section
 import json
 import os
 import time
 from datetime import date
 
+# Always write results next to this script, regardless of where Python is invoked from
 results_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
 os.makedirs(results_dir, exist_ok=True)
 
@@ -90,29 +92,36 @@ leagues = [
     #"Finnish Women's Basketball League",
 ]
 
-# Number of times to run the query for the selected league
+# Season year to query — used in both the prompt and the output filename
+year = 2023
+
+# Number of times to run the same query — higher n gives a better sample for accuracy analysis
 n = 2
 
 for league in leagues:
+    # Spaces replaced with underscores so the league name is safe to use in a filename
     league_slug = league.replace(" ", "_")
     runs = []
 
     for i in range(1, n + 1):
+        # Fresh message history each run — no context carried over between runs
         messages = []
         add_user_message(
             messages,
-            f"What was the total playing time in hours for the {league} in the season ending in 2023? Include post season playoffs, but don't include any overtime."
+            f"What was the total playing time in hours for the {league} in the season ending in {year}? Include post season playoffs, but don't include any overtime."
         )
 
+        # web_search=True lets Claude look up current data rather than relying on training knowledge
         answer = chat(messages, system="Make sure the last number in your response is the final answer in hours", temperature=1.0, web_search=True)
         runs.append({"run": i, "answer": answer})
         print(f"[{league}] Run {i}/{n} done")
 
-        # Pause between requests to avoid hitting API rate limits
+        # Pause between runs to stay within the API's token-per-minute rate limit
         if i < n:
             time.sleep(30)
 
-    filename = os.path.join(results_dir, f"{model}_{league_slug}_{date.today()}_{n}runs.json")
+    # Filename encodes all the key variables so results are self-identifying on disk
+    filename = os.path.join(results_dir, f"{model}_{league_slug}_{year}_{date.today()}_{n}runs.json")
     with open(filename, "w") as f:
-        json.dump({"model": model, "league": league, "n": n, "runs": runs}, f, indent=2)
+        json.dump({"model": model, "league": league, "year": year, "n": n, "runs": runs}, f, indent=2)
     print(f"Results written → {filename}")

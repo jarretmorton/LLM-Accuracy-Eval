@@ -1,0 +1,45 @@
+{
+  "query_template": "What was the total playing time in hours for the {league} in the season ending in {year}? Include post season playoffs, but don't include any overtime.",
+  "entries": [
+    {
+      "league": "National Football League",
+      "year": 2023,
+      "known_answer_hours": 285
+    },
+    {
+      "league": "Major League Baseball",
+      "year": 2023,
+      "known_answer_hours": 6589.33
+    },
+    {
+      "league": "Major League Soccer",
+      "year": 2023,
+      "known_answer_hours": 781.5
+    },
+    {
+      "league": "National Hockey League",
+      "year": 2023,
+      "known_answer_hours": 1400
+    },
+    {
+      "league": "Basketball Africa League",
+      "year": 2023,
+      "known_answer_hours": 25.33
+    },
+    {
+      "league": "Korean Baseball Organization League",
+      "year": 2023,
+      "known_answer_hours": 2348
+    },
+    {
+      "league": "Swedish Hockey League",
+      "year": 2023,
+      "known_answer_hours": 414
+    },
+    {
+      "league": "Finnish Women's Basketball League",
+      "year": 2023,
+      "known_answer_hours": 100.67
+    }
+  ]
+}
