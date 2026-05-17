@@ -98,11 +98,11 @@ leagues = [
     #"National Football League",
     #"Major League Baseball",
     #"Major League Soccer",
-    "National Hockey League",
+    #"National Hockey League",
     #"Basketball Africa League",
     #"Korean Baseball Organization League",
-    #"Swedish Hockey League",
-    #"Finnish Women's Basketball League",
+    "Swedish Hockey League",
+    "Finnish Women's Basketball League",
 ]
 
 # Season year to query — used in both the prompt and the output filename

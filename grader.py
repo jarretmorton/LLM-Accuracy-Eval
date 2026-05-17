@@ -10,7 +10,7 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 results_dir = os.path.join(base_dir, "results")
 
 # Set the result file to grade — filename only, no path
-input_file = "claude-haiku-4-5_National_Hockey_League_2023_2026-05-17_5runs.json"
+input_file = "claude-haiku-4-5_Swedish_Hockey_League_2023_2026-05-17_5runs.json"
 
 # Load ground truth — build a lookup keyed by (league, year)
 with open(os.path.join(base_dir, "truth.json")) as f:
