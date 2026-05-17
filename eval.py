@@ -63,7 +63,20 @@ def chat(messages, system=None, temperature=1.0, stop_sequences=[], web_search=F
     if web_search:
         params["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
 
-    message = client.messages.create(**params)
+    # Retry with exponential backoff on rate limit (429) or overload (529)
+    for attempt in range(5):
+        try:
+            message = client.messages.create(**params)
+            break
+        except Exception as e:
+            if hasattr(e, "status_code") and e.status_code in (429, 529):
+                wait = 60 * (attempt + 1)
+                print(f"API error {e.status_code} — retrying in {wait}s (attempt {attempt + 1}/5)")
+                time.sleep(wait)
+            else:
+                raise
+    else:
+        raise RuntimeError("Max retries exceeded")
 
     # Web search responses may mix text and tool-use blocks — join only the text parts
     return " ".join(block.text for block in message.content if block.type == "text")
@@ -96,7 +109,7 @@ leagues = [
 year = 2023
 
 # Number of times to run the same query — higher n gives a better sample for accuracy analysis
-n = 2
+n = 5
 
 for league in leagues:
     # Spaces replaced with underscores so the league name is safe to use in a filename
@@ -117,7 +130,7 @@ for league in leagues:
 
         # Pause between runs to stay within the API's token-per-minute rate limit
         if i < n:
-            time.sleep(40)
+            time.sleep(60)
 
     # Filename encodes all the key variables so results are self-identifying on disk
     filename = os.path.join(results_dir, f"{model}_{league_slug}_{year}_{date.today()}_{n}runs.json")
