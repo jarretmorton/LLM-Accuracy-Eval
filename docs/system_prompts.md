@@ -1,8 +1,12 @@
 # System Prompts
 
-> **Status:** Drafts — Week 1. The harness has only one prompt of its own: the LLM-as-judge grader. Everything else is the user's eval spec.
+> **Status:** v0.1 — no LLM prompts used by the current grader (`grader.py` is regex-based). The judge prompt below is a draft for the `judge` grader mode planned in a future release.
 
 ---
+
+## Model under test
+
+The harness sends `system=None` to the model under test. The LessWrong methodology this harness implements was originally run via claude.ai, which does not expose a system prompt to users. Sending a system prompt from the harness would push the API call away from that baseline. The judge prompt below is sent to a separate `judge_model`, not the model under test.
 
 ## Grader (LLM-as-judge)
 
@@ -32,8 +36,8 @@ Do not output anything outside the JSON object.
 
 ---
 
-## Notes for Week 3 revision
+## Open design questions
 
-- The judge prompt asserts a binary verdict. The post's stability metric is also binary (responses agree or they don't). If the judge is asked to grade *agreement between two model responses* rather than *agreement with ground truth*, the prompt needs a near-rewrite — agreement is symmetric, correctness is not.
-- The "refuses to answer" branch overlaps with the coverage-check step in the spec. Worth thinking about whether a coverage-check refusal and an in-the-wild refusal should be treated identically by metrics, or whether the harness should distinguish them.
-- The judge prompt is currently silent on calibration. If the eval is graded by the same model family that generated the responses, there's a known bias. Likely worth a `judge_model` field in the spec that the README warns against setting to a model in `models`.
+- **Agreement vs. correctness in the judge prompt.** The judge prompt above grades correctness against ground truth, not agreement between responses. The current methodology supports this directly — each run is graded against truth independently, and stability is derived from the per-run accuracies. The agreement-grading variant is not needed.
+- **Coverage-check refusal vs. in-the-wild refusal.** Open for when the coverage check lands in v0.2. Worth deciding whether the harness should distinguish a refusal from the coverage check (training-data signal) from a refusal during the primary query (semantic stability signal).
+- **Judge model independence.** When `grader: judge`, `judge_model` must not appear in `models`. Grading by a model in the same family as the model under test introduces a known bias. The spec validator will reject configurations that violate this rule; the README will document it.
