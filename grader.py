@@ -10,7 +10,7 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 results_dir = os.path.join(base_dir, "results")
 
 # Set the result file to grade — filename only, no path
-input_file = "claude-haiku-4-5_National_Hockey_League_2023_2026-05-16_2runs.json"
+input_file = "claude-haiku-4-5_National_Hockey_League_2023_2026-05-17_2runs.json"
 
 # Load ground truth — build a lookup keyed by (league, year)
 with open(os.path.join(base_dir, "truth.json")) as f:
@@ -23,16 +23,25 @@ truth_lookup = {
 
 # --- Helpers --------------------------
 
-def extract_last_number(text):
-    # The system prompt instructs Claude to end with its numeric answer, so the last number is authoritative
-    numbers = re.findall(r'\b\d+(?:,\d+)*(?:\.\d+)?\b', text)
-    if not numbers:
+def extract_unit_from_query(query):
+    # Find "in <unit>" where the unit is a word, not a number (avoids matching "in 2023")
+    match = re.search(r'\bin\s+([a-zA-Z]+)\b(?!\s+\d)', query)
+    # Strip trailing "s" to normalize plural → singular for use in regex (e.g. "hours" → "hour")
+    return match.group(1).rstrip("s") if match else None
+
+def extract_last_number(text, unit=None):
+    if unit:
+        # Find numbers immediately followed by the unit word (singular or plural)
+        matches = re.findall(rf'\b(\d+(?:,\d+)*(?:\.\d+)?)\s+{unit}s?\b', text, re.IGNORECASE)
+    else:
+        matches = re.findall(r'\b\d+(?:,\d+)*(?:\.\d+)?\b', text)
+    if not matches:
         return None
     # Remove commas from numbers like "1,400" before converting to float
-    return float(numbers[-1].replace(",", ""))
+    return float(matches[-1].replace(",", ""))
 
-def grade_run(answer_text, known_answer):
-    extracted = extract_last_number(answer_text)
+def grade_run(answer_text, known_answer, unit=None):
+    extracted = extract_last_number(answer_text, unit)
 
     if extracted is None:
         return {"extracted": None, "known": known_answer, "exact_match": False, "accuracy": None, "reason": "No number found in response"}
@@ -73,10 +82,13 @@ known_answer = truth_lookup.get((league, year))
 if known_answer is None:
     raise ValueError(f"No truth entry found for ({league}, {year})")
 
+# Extract the unit from the query so the grader looks for numbers paired with it (e.g. "1,400 hours")
+unit = extract_unit_from_query(result["query"])
+
 # Grade each individual run
 graded_runs = []
 for run in result["runs"]:
-    graded = grade_run(run["answer"], known_answer)
+    graded = grade_run(run["answer"], known_answer, unit)
     graded_runs.append({"run": run["run"], **graded})
 
 # Summarize across all runs — exclude runs where extraction failed

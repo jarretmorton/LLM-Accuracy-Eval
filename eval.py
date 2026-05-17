@@ -111,7 +111,7 @@ for league in leagues:
         add_user_message(messages, query)
 
         # web_search=True lets Claude look up current data rather than relying on training knowledge
-        answer = chat(messages, system="Make sure the last number in your response is the final answer in hours", temperature=1.0, web_search=True)
+        answer = chat(messages, system=None, temperature=1.0, web_search=True)
         runs.append({"run": i, "answer": answer})
         print(f"[{league}] Run {i}/{n} done")
 
@@ -124,3 +124,7 @@ for league in leagues:
     with open(filename, "w") as f:
         json.dump({"model": model, "query": query, "league": league, "year": year, "n": n, "runs": runs}, f, indent=2)
     print(f"Results written → {filename}")
+
+    # Pause between leagues to let the token-per-minute window reset
+    if league != leagues[-1]:
+        time.sleep(60)
