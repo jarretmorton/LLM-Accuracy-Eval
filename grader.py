@@ -124,9 +124,13 @@ mean_of_extracted = round(statistics.mean(valid_extracted), 4) if len(valid_extr
 # 1.0 = perfectly consistent answers, lower = more variance relative to mean
 stability_of_extracted = round(1 - (stdev_of_extracted / mean_of_extracted), 4) if stdev_of_extracted is not None and mean_of_extracted else None
 
+runs_with_refusals = sum(1 for r in graded_runs if r["run_refused"])
+
 summary = {
     "runs_graded": len(graded_runs),
     "runs_with_extraction": len(valid_accuracies),
+    "runs_with_refusals": runs_with_refusals,
+    "all_runs_accounted_for": (len(valid_accuracies) + runs_with_refusals) == len(graded_runs),
     "mean_accuracy_of_extracted": mean_accuracy_of_extracted,
     "stability_of_extracted": stability_of_extracted,
 }
@@ -148,5 +152,10 @@ with open(graded_filepath, "w") as f:
     json.dump(output, f, indent=2)
 
 print(f"Graded: {graded_filename}")
+print(f"Runs graded:                {summary['runs_graded']}")
+print(f"Runs with extraction:       {summary['runs_with_extraction']}")
+print(f"Runs with refusals:         {summary['runs_with_refusals']}")
+if not summary["all_runs_accounted_for"]:
+    print("WARNING: runs_with_extraction + runs_with_refusals does not equal runs_graded")
 print(f"Mean accuracy of extracted: {summary['mean_accuracy_of_extracted']}")
 print(f"Stability of extracted:     {summary['stability_of_extracted']}")
