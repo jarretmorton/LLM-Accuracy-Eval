@@ -100,8 +100,8 @@ leagues = [
     #"Major League Soccer",
     #"National Hockey League",
     #"Basketball Africa League",
-    #"Korean Baseball Organization League",
-    #"Swedish Hockey League",
+    "Korean Baseball Organization League",
+    "Swedish Hockey League",
     "Finnish Women's Basketball League",
 ]
 
