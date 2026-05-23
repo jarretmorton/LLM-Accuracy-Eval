@@ -38,6 +38,18 @@ def is_refusal(text):
     # Returns True if any refusal pattern matches anywhere in the text (case-insensitive)
     return any(re.search(p, text, re.IGNORECASE) for p in REFUSAL_PATTERNS)
 
+def extract_confidence(text):
+    # Try range first (e.g., "25-30%") — return the midpoint
+    range_match = re.search(r'(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)\s*%', text)
+    if range_match:
+        low, high = float(range_match.group(1)), float(range_match.group(2))
+        return round((low + high) / 2, 1)
+    # Fall back to single value (e.g., "Confidence Level: 15%")
+    single_match = re.search(r'(\d+(?:\.\d+)?)\s*%', text)
+    if single_match:
+        return float(single_match.group(1))
+    return None
+
 def extract_unit_from_query(query):
     # Find "in <unit>" where the unit is a word, not a number (avoids matching "in 2023")
     match = re.search(r'\bin\s+([a-zA-Z]+)\b(?!\s+\d)', query)
@@ -45,7 +57,14 @@ def extract_unit_from_query(query):
     return match.group(1).rstrip("s") if match else None
 
 def extract_last_number(text, unit=None):
+    # Strip percentage values (e.g., "15%", "25-30%") so confidence numbers are never matched as the answer
+    text = re.sub(r'\d+(?:\.\d+)?\s*(?:[-–]\s*\d+(?:\.\d+)?)?\s*%', '', text)
     if unit:
+        # Check for a range paired with the unit (e.g., "778-788 hours") — return the average of the bounds
+        range_matches = re.findall(rf'\b(\d+(?:,\d+)*(?:\.\d+)?)\s*[-–]\s*(\d+(?:,\d+)*(?:\.\d+)?)\s+{unit}s?\b', text, re.IGNORECASE)
+        if range_matches:
+            low, high = range_matches[-1]
+            return round((float(low.replace(",", "")) + float(high.replace(",", ""))) / 2, 4)
         # Find numbers immediately followed by the unit word (singular or plural)
         matches = re.findall(rf'\b(\d+(?:,\d+)*(?:\.\d+)?)\s+{unit}s?\b', text, re.IGNORECASE)
     else:
@@ -105,7 +124,10 @@ graded_runs = []
 for run in result["runs"]:
     graded = grade_run(run["answer"], known_answer, unit)
     # run_refused is True only when extraction failed and a refusal phrase was found
-    graded_runs.append({"run": run["run"], "run_refused": graded["extracted"] is None and is_refusal(run["answer"]), **graded})
+    run_refused = graded["extracted"] is None and is_refusal(run["answer"])
+    # Confidence is null when no number was extracted — a stated confidence without an answer is not meaningful
+    confidence = extract_confidence(run["answer"]) if graded["extracted"] is not None else None
+    graded_runs.append({"run": run["run"], "run_refused": run_refused, **{k: v for k, v in graded.items() if k != "accuracy"}, "confidence": confidence, "accuracy": graded["accuracy"]})
 
 # Build list of accuracy scores from runs where extraction succeeded
 valid_accuracies = [r["accuracy"] for r in graded_runs if r["accuracy"] is not None]
@@ -128,11 +150,16 @@ stability_of_extracted = round(1 - (stdev_of_extracted / mean_of_extracted), 4) 
 # Count refused runs separately so it can be used inside the summary dict and in the accounting check
 runs_with_refusals = sum(1 for r in graded_runs if r["run_refused"])
 
+# Average confidence across runs where confidence was extracted; None if no valid confidence values
+valid_confidences = [r["confidence"] for r in graded_runs if r["confidence"] is not None]
+mean_confidence = round(sum(valid_confidences) / len(valid_confidences), 1) if valid_confidences else None
+
 summary = {
     "runs_graded": len(graded_runs),
     "runs_with_extraction": len(valid_accuracies),
     "runs_with_refusals": runs_with_refusals,
     "all_runs_accounted_for": (len(valid_accuracies) + runs_with_refusals) == len(graded_runs),
+    "mean_confidence": mean_confidence,
     "mean_accuracy_of_extracted": mean_accuracy_of_extracted,
     "stability_of_extracted": stability_of_extracted,
 }
@@ -159,5 +186,6 @@ print(f"Runs with extraction:       {summary['runs_with_extraction']}")
 print(f"Runs with refusals:         {summary['runs_with_refusals']}")
 if not summary["all_runs_accounted_for"]:
     print("WARNING: runs_with_extraction + runs_with_refusals does not equal runs_graded")
+print(f"Mean confidence:            {summary['mean_confidence']}")
 print(f"Mean accuracy of extracted: {summary['mean_accuracy_of_extracted']}")
 print(f"Stability of extracted:     {summary['stability_of_extracted']}")
