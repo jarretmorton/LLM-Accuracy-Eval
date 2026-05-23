@@ -91,18 +91,29 @@ for run in result["runs"]:
     graded = grade_run(run["answer"], known_answer, unit)
     graded_runs.append({"run": run["run"], **graded})
 
-# Summarize across all runs — exclude runs where extraction failed
+# Build list of accuracy scores from runs where extraction succeeded
 valid_accuracies = [r["accuracy"] for r in graded_runs if r["accuracy"] is not None]
+
+# Average accuracy across valid runs; None if no valid runs
 mean_accuracy_of_extracted = round(sum(valid_accuracies) / len(valid_accuracies), 4) if valid_accuracies else None
-stdev_accuracy = round(statistics.stdev(valid_accuracies), 4) if len(valid_accuracies) > 1 else None
-stability = round(1 - (stdev_accuracy / mean_accuracy_of_extracted), 4) if stdev_accuracy is not None and mean_accuracy_of_extracted else None
+
+# Build list of raw extracted numbers from runs where extraction succeeded
+valid_extracted = [r["extracted"] for r in graded_runs if r["extracted"] is not None]
+
+# Spread of extracted numbers; requires at least 2 samples
+stdev_of_extracted = round(statistics.stdev(valid_extracted), 4) if len(valid_extracted) > 1 else None
+
+# Average of extracted numbers; requires at least 2 samples
+mean_of_extracted = round(statistics.mean(valid_extracted), 4) if len(valid_extracted) > 1 else None
+
+# 1.0 = perfectly consistent answers, lower = more variance relative to mean
+stability_of_extracted = round(1 - (stdev_of_extracted / mean_of_extracted), 4) if stdev_of_extracted is not None and mean_of_extracted else None
 
 summary = {
     "runs_graded": len(graded_runs),
     "runs_with_extraction": len(valid_accuracies),
     "mean_accuracy_of_extracted": mean_accuracy_of_extracted,
-    "stdev_accuracy": stdev_accuracy,
-    "stability": stability,
+    "stability_of_extracted": stability_of_extracted,
 }
 
 output = {
@@ -123,4 +134,4 @@ with open(graded_filepath, "w") as f:
 
 print(f"Graded: {graded_filename}")
 print(f"Mean accuracy of extracted: {summary['mean_accuracy_of_extracted']}")
-print(f"Stability:     {summary['stability']}")
+print(f"Stability of extracted:     {summary['stability_of_extracted']}")
