@@ -104,6 +104,7 @@ unit = extract_unit_from_query(result["query"])
 graded_runs = []
 for run in result["runs"]:
     graded = grade_run(run["answer"], known_answer, unit)
+    # run_refused is True only when extraction failed and a refusal phrase was found
     graded_runs.append({"run": run["run"], "run_refused": graded["extracted"] is None and is_refusal(run["answer"]), **graded})
 
 # Build list of accuracy scores from runs where extraction succeeded
@@ -124,6 +125,7 @@ mean_of_extracted = round(statistics.mean(valid_extracted), 4) if len(valid_extr
 # 1.0 = perfectly consistent answers, lower = more variance relative to mean
 stability_of_extracted = round(1 - (stdev_of_extracted / mean_of_extracted), 4) if stdev_of_extracted is not None and mean_of_extracted else None
 
+# Count refused runs separately so it can be used inside the summary dict and in the accounting check
 runs_with_refusals = sum(1 for r in graded_runs if r["run_refused"])
 
 summary = {
