@@ -27,13 +27,20 @@ truth_lookup = {
 REFUSAL_PATTERNS = [
     r"I don't have access",
     r"I cannot find",
+    r"I cannot provide",
+    r"I could not find",
+    r"I could not",
     r"I'm not sure",
     r"I don't know",
     r"I don't have information about",
+    r"I do not have",
     r"I was unable to find",
     r"I'm unable to find",
+    r"I am unable to",
+    r"Without access to",
+    r"did not return any source",
+    r"could not be found",
 ]
-
 def is_refusal(text):
     # Returns True if any refusal pattern matches anywhere in the text (case-insensitive)
     return any(re.search(p, text, re.IGNORECASE) for p in REFUSAL_PATTERNS)
