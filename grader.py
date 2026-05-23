@@ -93,16 +93,14 @@ for run in result["runs"]:
 
 # Summarize across all runs — exclude runs where extraction failed
 valid_accuracies = [r["accuracy"] for r in graded_runs if r["accuracy"] is not None]
-mean_accuracy = round(sum(valid_accuracies) / len(valid_accuracies), 4) if valid_accuracies else None
+mean_accuracy_of_extracted = round(sum(valid_accuracies) / len(valid_accuracies), 4) if valid_accuracies else None
 stdev_accuracy = round(statistics.stdev(valid_accuracies), 4) if len(valid_accuracies) > 1 else None
-stability = round(1 - (stdev_accuracy / mean_accuracy), 4) if stdev_accuracy is not None and mean_accuracy else None
+stability = round(1 - (stdev_accuracy / mean_accuracy_of_extracted), 4) if stdev_accuracy is not None and mean_accuracy_of_extracted else None
 
 summary = {
     "runs_graded": len(graded_runs),
     "runs_with_extraction": len(valid_accuracies),
-    "mean_accuracy": mean_accuracy,
-    "min_accuracy": round(min(valid_accuracies), 4) if valid_accuracies else None,
-    "max_accuracy": round(max(valid_accuracies), 4) if valid_accuracies else None,
+    "mean_accuracy_of_extracted": mean_accuracy_of_extracted,
     "stdev_accuracy": stdev_accuracy,
     "stability": stability,
 }
@@ -124,5 +122,5 @@ with open(graded_filepath, "w") as f:
     json.dump(output, f, indent=2)
 
 print(f"Graded: {graded_filename}")
-print(f"Mean accuracy: {summary['mean_accuracy']}")
+print(f"Mean accuracy of extracted: {summary['mean_accuracy_of_extracted']}")
 print(f"Stability:     {summary['stability']}")
