@@ -10,7 +10,7 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 results_dir = os.path.join(base_dir, "results")
 
 # Set the result file to grade — filename only, no path
-input_file = "claude-haiku-4-5_Swedish_Hockey_League_2023_2026-05-23_2runs.json"
+input_file = "claude-haiku-4-5_Finnish_Women's_Basketball_League_2023_2026-05-23_5runs.json"
 
 # Load ground truth — build a lookup keyed by (league, year)
 with open(os.path.join(base_dir, "truth.json")) as f:
@@ -123,8 +123,8 @@ unit = extract_unit_from_query(result["query"])
 graded_runs = []
 for run in result["runs"]:
     graded = grade_run(run["answer"], known_answer, unit)
-    # run_refused is True only when extraction failed and a refusal phrase was found
-    run_refused = graded["extracted"] is None and is_refusal(run["answer"])
+    # run_refused is True whenever a refusal phrase is found, regardless of whether a number was extracted
+    run_refused = is_refusal(run["answer"])
     # Confidence is null when no number was extracted — a stated confidence without an answer is not meaningful
     confidence = extract_confidence(run["answer"]) if graded["extracted"] is not None else None
     graded_runs.append({"run": run["run"], "run_refused": run_refused, **{k: v for k, v in graded.items() if k != "accuracy"}, "confidence": confidence, "accuracy": graded["accuracy"]})

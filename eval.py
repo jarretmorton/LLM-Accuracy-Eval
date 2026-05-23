@@ -101,15 +101,15 @@ leagues = [
     #"National Hockey League",
     #"Basketball Africa League",
     #"Korean Baseball Organization League",
-    "Swedish Hockey League",
-    #"Finnish Women's Basketball League",
+    #"Swedish Hockey League",
+    "Finnish Women's Basketball League",
 ]
 
 # Season year to query — used in both the prompt and the output filename
 year = 2023
 
 # Number of times to run the same query — higher n gives a better sample for accuracy analysis
-n = 2
+n = 5
 
 for league in leagues:
     # Spaces replaced with underscores so the league name is safe to use in a filename
