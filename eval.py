@@ -116,6 +116,13 @@ for league in leagues:
     league_slug = league.replace(" ", "_")
     runs = []
 
+    pre_query = f"Do not search the internet for this answer (use only your training). What was the final game winning score for the {league} in the season ending in {year}."
+    pre_messages = []
+    add_user_message(pre_messages, pre_query)
+    pre_answer = chat(pre_messages, system=None, temperature=1.0, web_search=False)
+    print(f"[{league}] Pre-query done")
+    time.sleep(60)
+
     query = f"What was the total playing time in hours for the {league} in the season ending in {year}? Include post season playoffs, but don't include any overtime. What is your confidence in this answer 0% to 100%?"
 
     for i in range(1, n + 1):
@@ -135,7 +142,7 @@ for league in leagues:
     # Filename encodes all the key variables so results are self-identifying on disk
     filename = os.path.join(results_dir, f"{model}_{league_slug}_{year}_{date.today()}_{n}runs.json")
     with open(filename, "w") as f:
-        json.dump({"model": model, "query": query, "league": league, "year": year, "n": n, "runs": runs}, f, indent=2)
+        json.dump({"model": model, "pre_query": pre_query, "pre_answer": pre_answer, "query": query, "league": league, "year": year, "n": n, "runs": runs}, f, indent=2)
     print(f"Results written → {filename}")
 
     # Pause between leagues to let the token-per-minute window reset
