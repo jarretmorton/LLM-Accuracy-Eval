@@ -102,21 +102,21 @@ leagues = [
     #"Basketball Africa League",
     #"Korean Baseball Organization League",
     "Swedish Hockey League",
-    "Finnish Women's Basketball League",
+    #"Finnish Women's Basketball League",
 ]
 
 # Season year to query — used in both the prompt and the output filename
 year = 2023
 
 # Number of times to run the same query — higher n gives a better sample for accuracy analysis
-n = 5
+n = 2
 
 for league in leagues:
     # Spaces replaced with underscores so the league name is safe to use in a filename
     league_slug = league.replace(" ", "_")
     runs = []
 
-    query = f"What was the total playing time in hours for the {league} in the season ending in {year}? Include post season playoffs, but don't include any overtime."
+    query = f"What was the total playing time in hours for the {league} in the season ending in {year}? Include post season playoffs, but don't include any overtime. What is your confidence in this answer 0% to 100%?"
 
     for i in range(1, n + 1):
         # Fresh message history each run — no context carried over between runs

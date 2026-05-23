@@ -1,5 +1,5 @@
 {
-  "query_template": "What was the total playing time in hours for the {league} in the season ending in {year}? Include post season playoffs, but don't include any overtime.",
+  "query_template": "What was the total playing time in hours for the {league} in the season ending in {year}? Include post season playoffs, but don't include any overtime. What is your confidence in this answer 0% to 100%?",
   "entries": [
     {
       "league": "National Football League",
