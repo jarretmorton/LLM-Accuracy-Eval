@@ -40,6 +40,7 @@ REFUSAL_PATTERNS = [
     r"Without access to",
     r"did not return any source",
     r"could not be found",
+    r"I don't have reliable information",
 ]
 def is_refusal(text):
     # Returns True if any refusal pattern matches anywhere in the text (case-insensitive)
@@ -126,6 +127,9 @@ if known_answer is None:
 # Extract the unit from the query so the grader looks for numbers paired with it (e.g. "1,400 hours")
 unit = extract_unit_from_query(result["query"])
 
+# Check whether the model answered the pre-query; False if it refused
+pre_query_answered = not is_refusal(result["pre_answer"])
+
 # Grade each individual run
 graded_runs = []
 for run in result["runs"]:
@@ -162,6 +166,7 @@ valid_confidences = [r["confidence"] for r in graded_runs if r["confidence"] is 
 mean_confidence = round(sum(valid_confidences) / len(valid_confidences), 1) if valid_confidences else None
 
 summary = {
+    "pre_query_answered": pre_query_answered,
     "runs_graded": len(graded_runs),
     "runs_with_extraction": len(valid_accuracies),
     "runs_with_refusals": runs_with_refusals,
@@ -173,6 +178,7 @@ summary = {
 
 output = {
     "model": result["model"],
+    "pre_query": result.get("pre_query"),
     "query": result["query"],
     "league": league,
     "year": year,
@@ -188,6 +194,7 @@ with open(graded_filepath, "w") as f:
     json.dump(output, f, indent=2)
 
 print(f"Graded: {graded_filename}")
+print(f"Pre-query answered:         {summary['pre_query_answered']}")
 print(f"Runs graded:                {summary['runs_graded']}")
 print(f"Runs with extraction:       {summary['runs_with_extraction']}")
 print(f"Runs with refusals:         {summary['runs_with_refusals']}")
