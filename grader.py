@@ -23,6 +23,21 @@ truth_lookup = {
 
 # --- Helpers --------------------------
 
+# Phrases that indicate the model couldn't answer — extend this list as new patterns are observed
+REFUSAL_PATTERNS = [
+    r"I don't have access",
+    r"I cannot find",
+    r"I'm not sure",
+    r"I don't know",
+    r"I don't have information about",
+    r"I was unable to find",
+    r"I'm unable to find",
+]
+
+def is_refusal(text):
+    # Returns True if any refusal pattern matches anywhere in the text (case-insensitive)
+    return any(re.search(p, text, re.IGNORECASE) for p in REFUSAL_PATTERNS)
+
 def extract_unit_from_query(query):
     # Find "in <unit>" where the unit is a word, not a number (avoids matching "in 2023")
     match = re.search(r'\bin\s+([a-zA-Z]+)\b(?!\s+\d)', query)
@@ -89,7 +104,7 @@ unit = extract_unit_from_query(result["query"])
 graded_runs = []
 for run in result["runs"]:
     graded = grade_run(run["answer"], known_answer, unit)
-    graded_runs.append({"run": run["run"], **graded})
+    graded_runs.append({"run": run["run"], "run_refused": graded["extracted"] is None and is_refusal(run["answer"]), **graded})
 
 # Build list of accuracy scores from runs where extraction succeeded
 valid_accuracies = [r["accuracy"] for r in graded_runs if r["accuracy"] is not None]
