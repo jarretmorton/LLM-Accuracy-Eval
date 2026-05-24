@@ -68,6 +68,7 @@ Thumbs.db
 # Eval run outputs
 results/
 runs/
+old/
 *.jsonl
 *.log
 
