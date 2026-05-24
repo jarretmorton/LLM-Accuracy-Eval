@@ -15,8 +15,7 @@ if it's missing.
 # --- Imports --------------------------
 
 # dataclass is the cleanest way to declare a typed record-like object.
-# field() lets us give a list/dict default without the mutable-default bug.
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 # PyYAML's safe_load parses YAML into Python primitives (dict, list, str,
@@ -35,7 +34,7 @@ ALLOWED_GRADER_TYPES = {"exact", "numeric", "judge", "none"}
 # missing any of these before trying to construct the typed object.
 REQUIRED_TOP_LEVEL = (
     "name", "version", "models", "runs", "temperature",
-    "grader", "topics", "queries", "refusal_patterns", "output",
+    "grader", "topics", "queries", "output",
 )
 
 # Fields each topic dict must contain. Validated per-topic in Spec.__post_init__.
@@ -79,6 +78,7 @@ class GraderConfig:
     """Grader settings — type selector plus type-specific options."""
     type: str
     expected_unit: str
+    refusal_patterns: list
 
     def __post_init__(self):
         if self.type not in ALLOWED_GRADER_TYPES:
@@ -88,6 +88,8 @@ class GraderConfig:
             )
         if not self.expected_unit:
             raise ValueError("grader.expected_unit must be set (e.g. 'hours')")
+        if not self.refusal_patterns:
+            raise ValueError("grader.refusal_patterns must not be empty")
 
 
 @dataclass
@@ -122,7 +124,6 @@ class Spec:
     grader: GraderConfig
     topics: list
     queries: QueriesConfig
-    refusal_patterns: list
     output: OutputConfig
     description: str = ""
 
@@ -238,6 +239,5 @@ def load_spec(path) -> Spec:
         grader=grader,
         topics=raw["topics"],
         queries=queries,
-        refusal_patterns=raw["refusal_patterns"],
         output=output,
     )

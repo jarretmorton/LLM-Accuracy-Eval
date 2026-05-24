@@ -21,9 +21,17 @@ from anthropic import Anthropic
 # Safe to call at module import — load_dotenv() is idempotent.
 load_dotenv()
 
-# Module-level Anthropic client. One instance is reused across all calls.
-client = Anthropic()
+# Anthropic client, lazily initialised on first use so importing query.py
+# has no side effects (notably, doesn't require an API key). One instance
+# is reused across all calls.
+_client = None
 
+def get_client():
+    """Lazily construct the Anthropic client on first use."""
+    global _client
+    if _client is None:
+        _client = Anthropic()
+    return _client
 
 # --- Constants --------------------------
 
@@ -81,7 +89,7 @@ def chat(messages, model, system=None, temperature=1.0, stop_sequences=None, web
     # 60s, 120s, 180s, 240s, 300s — total max wait ~25 minutes across 5 attempts.
     for attempt in range(MAX_RETRIES):
         try:
-            message = client.messages.create(**params)
+            message = get_client().messages.create(**params)
             break
         except Exception as e:
             if hasattr(e, "status_code") and e.status_code in (429, 529):
