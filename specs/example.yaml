@@ -18,10 +18,10 @@ description: >
 # Models to run against. Strings are passed verbatim to the provider.
 models:
   - claude-haiku-4-5
-  - claude-opus-4-7
+#  - claude-opus-4-7
 
 # Number of times to run each primary query, per model, per topic.
-runs: 5
+runs: 1
 
 # Sampling temperature. 1.0 matches claude.ai's apparent default (per
 # third-party measurement), the platform used in the original LessWrong study.
@@ -61,13 +61,13 @@ grader:
 
 # defines leagues, year, and truth for that league in that year
 topics:
-  - {league: "National Football League",            year: 2023, truth: 285}
-  - {league: "Major League Baseball",               year: 2023, truth: 6589.33}
-  - {league: "Major League Soccer",                 year: 2023, truth: 781.5}
-  - {league: "National Hockey League",              year: 2023, truth: 1400}
-  - {league: "Basketball Africa League",            year: 2023, truth: 25.33}
-  - {league: "Korean Baseball Organization League", year: 2023, truth: 2348}
-  - {league: "Swedish Hockey League",               year: 2023, truth: 414}
+#  - {league: "National Football League",            year: 2023, truth: 285}
+#  - {league: "Major League Baseball",               year: 2023, truth: 6589.33}
+#  - {league: "Major League Soccer",                 year: 2023, truth: 781.5}
+#  - {league: "National Hockey League",              year: 2023, truth: 1400}
+#  - {league: "Basketball Africa League",            year: 2023, truth: 25.33}
+#  - {league: "Korean Baseball Organization League", year: 2023, truth: 2348}
+#  - {league: "Swedish Hockey League",               year: 2023, truth: 414}
   - {league: "Finnish Women's Basketball League",   year: 2023, truth: 100.67}
 
 # queries are from less wrong post with a correction to add a question mark to end of pre_query
