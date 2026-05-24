@@ -18,7 +18,7 @@ description: >
 # Models to run against. Strings are passed verbatim to the provider.
 models:
   - claude-haiku-4-5
-#  - claude-opus-4-7
+  - claude-opus-4-7
 
 # Number of times to run each primary query, per model, per topic.
 runs: 2
