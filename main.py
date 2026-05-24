@@ -38,7 +38,7 @@ from pathlib import Path
 # this file knows how to chain them. That's the separation we wanted.
 from spec import load_spec        # load_spec(path: str) -> Spec
 from query import run_harness     # run_harness(spec: Spec) -> Path
-from grader import grade_results  # grade_results(results_path: Path, spec: Spec) -> Path
+from grader import grade_results, generate_plots  # grade_results(results_path: Path, spec: Spec) -> Path
 
 
 # --- Subcommand handlers --------------------------
@@ -72,6 +72,11 @@ def cmd_run(args: argparse.Namespace) -> None:
     print("Grading results...")
     graded_path = grade_results(results_path, spec)
     print(f"Graded results written → {graded_path}")
+
+    print("Generating plots...")
+    plot_paths = generate_plots(graded_path, spec)
+    for p in plot_paths:
+        print(f"  Wrote {p}")
 
 
 def cmd_collect(args: argparse.Namespace) -> None:
@@ -109,6 +114,11 @@ def cmd_grade(args: argparse.Namespace) -> None:
     print(f"Grading {results_path} against spec {spec.name}...")
     graded_path = grade_results(results_path, spec)
     print(f"Graded results written → {graded_path}")
+
+    print("Generating plots...")
+    plot_paths = generate_plots(graded_path, spec)
+    for p in plot_paths:
+        print(f"  Wrote {p}")
 
 
 # --- CLI setup --------------------------

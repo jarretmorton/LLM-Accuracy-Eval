@@ -27,6 +27,12 @@ import statistics
 from datetime import date
 from pathlib import Path
 
+# Plotting dependencies are lazy-loaded inside generate_plots() rather than
+# at module-level, so importing grader.py is cheap and `grade` works on
+# machines without matplotlib. The actual import happens at first plot call.
+import importlib.util
+import subprocess
+import sys
 
 # --- Helpers --------------------------
 
@@ -346,3 +352,256 @@ def grade_results(results_path, spec) -> Path:
         json.dump(output, f, indent=2)
 
     return graded_path
+
+# --- Plotting --------------------------
+
+def _ensure_plotting_deps():
+    """
+    Lazy-install and import matplotlib + numpy.
+
+    Returns (plt, np). Called at the top of generate_plots() so the deps
+    are only required when actually plotting — running `grade` alone
+    doesn't need them.
+    """
+    if importlib.util.find_spec("matplotlib") is None:
+        subprocess.run([sys.executable, "-m", "pip", "install", "matplotlib"], check=True)
+    # numpy comes as a transitive dep of matplotlib, but check anyway for safety.
+    if importlib.util.find_spec("numpy") is None:
+        subprocess.run([sys.executable, "-m", "pip", "install", "numpy"], check=True)
+
+    import matplotlib
+    matplotlib.use("Agg")  # file-only backend; no display or GUI framework needed
+    import matplotlib.pyplot as plt
+    import numpy as np
+    return plt, np
+
+
+def _fit_linear(x_values, y_values, np):
+    """
+    Fit a linear trend line to (x, y) data.
+
+    Returns (slope, intercept, r_squared, x_line, y_line) where x_line and
+    y_line are two-point arrays suitable for matplotlib's plot(). Returns
+    None if fewer than 2 points (a line needs at least two).
+
+    R² is computed as 1 - SS_residual / SS_total. R²=1 means the line
+    explains all variance; R²=0 means the line is no better than the mean;
+    negative R² would mean the line is worse than predicting the mean
+    (can happen with bad fits but won't here since we're fitting to the
+    same data we're scoring).
+    """
+    if len(x_values) < 2:
+        return None
+
+    x_arr = np.array(x_values)
+    y_arr = np.array(y_values)
+
+    # polyfit returns coefficients in descending-degree order. For degree 1
+    # that's [slope, intercept].
+    slope, intercept = np.polyfit(x_arr, y_arr, 1)
+
+    # R² from sum-of-squares definition.
+    y_predicted = slope * x_arr + intercept
+    ss_residual = np.sum((y_arr - y_predicted) ** 2)
+    ss_total = np.sum((y_arr - np.mean(y_arr)) ** 2)
+    r_squared = 1 - (ss_residual / ss_total) if ss_total > 0 else 1.0
+
+    # Generate two endpoints spanning the data's x range for plt.plot().
+    x_line = np.array([x_arr.min(), x_arr.max()])
+    y_line = slope * x_line + intercept
+
+    return slope, intercept, r_squared, x_line, y_line
+
+
+def _plot_scatter_with_trends(data_by_model, x_label, y_label, title, output_path, plt, np):
+    """
+    Scatter plot colored by model with per-model + combined linear trend lines.
+
+    Parameters
+    ----------
+    data_by_model : dict
+        {model_name: [(x1, y1), (x2, y2), ...]}. Points where either coord
+        is None are filtered out per-model (an entry can contribute to one
+        plot but not another if e.g. its confidence is None but its
+        stability isn't).
+    x_label, y_label, title : str
+        Axes labels and plot title.
+    output_path : Path
+        Where to write the PNG.
+    plt, np : modules
+        Passed in from _ensure_plotting_deps so this function doesn't
+        re-import them.
+    """
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    # tab10 colormap gives 10 visually distinct colors. Slice it to the
+    # number of models we actually have so each gets its own color.
+    colors = plt.cm.tab10(np.linspace(0, 1, max(len(data_by_model), 1)))
+
+    # Accumulate all valid points for the combined trend line at the end.
+    all_x = []
+    all_y = []
+
+    for color, (model_name, points) in zip(colors, data_by_model.items()):
+        # Filter out points with None on either axis. An entry might have a
+        # mean_accuracy but no mean_confidence, for example, if every run
+        # for that entry failed to state a confidence percentage.
+        valid = [(x, y) for x, y in points if x is not None and y is not None]
+        if not valid:
+            continue
+
+        x_vals = [p[0] for p in valid]
+        y_vals = [p[1] for p in valid]
+
+        # Scatter for this model.
+        ax.scatter(x_vals, y_vals, color=color, label=model_name, alpha=0.75, s=70)
+
+        # Per-model trend line — dashed to distinguish from the combined fit.
+        fit = _fit_linear(x_vals, y_vals, np)
+        if fit is not None:
+            slope, _, r2, x_line, y_line = fit
+            ax.plot(x_line, y_line, color=color, linestyle="--", alpha=0.6,
+                    label=f"{model_name} fit  (slope={slope:.3f}, R²={r2:.3f})")
+
+        all_x.extend(x_vals)
+        all_y.extend(y_vals)
+
+    # Combined trend across all models — solid black, thicker, drawn last
+    # so it sits on top of the per-model lines.
+    if len(all_x) >= 2:
+        fit = _fit_linear(all_x, all_y, np)
+        if fit is not None:
+            slope, _, r2, x_line, y_line = fit
+            ax.plot(x_line, y_line, color="black", linestyle="-", linewidth=2,
+                    label=f"All models fit  (slope={slope:.3f}, R²={r2:.3f})")
+
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", fontsize=9)
+
+    # tight_layout adjusts margins so labels/legend don't get clipped.
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    # Close the figure explicitly — matplotlib keeps figures alive otherwise,
+    # which leaks memory across multiple plot generations.
+    plt.close(fig)
+
+
+# --- Public API (plotting) --------------------------
+
+def generate_plots(graded_path, spec, output_dir=None):
+    """
+    Generate three accuracy plots from a graded results file.
+
+    Plots:
+      1. accuracy_vs_confidence.png             — mean_accuracy vs mean_confidence
+      2. accuracy_vs_stability.png              — mean_accuracy vs stability (all)
+      3. accuracy_vs_stability_filtered.png     — mean_accuracy vs stability,
+                                                   pre_query_answered=True only
+
+    Each plot has:
+      - Scatter points colored by model
+      - Per-model linear trend lines (dashed, model-colored)
+      - Combined linear trend across all models (solid black)
+      - Legend showing slope and R² for every fit
+
+    Parameters
+    ----------
+    graded_path : str | Path
+        Path to the graded results JSON file.
+    spec : Spec
+        Loaded spec — used to put the eval name in plot titles.
+    output_dir : str | Path, optional
+        Where to write plots. Defaults to the same directory as graded_path.
+
+    Returns
+    -------
+    list[Path]
+        Paths to the three generated plots in the listed order.
+    """
+    # Lazy-load plotting deps and grab references to pass through to helpers.
+    plt, np = _ensure_plotting_deps()
+
+    graded_path = Path(graded_path)
+    with open(graded_path) as f:
+        graded = json.load(f)
+
+    # Default output: alongside the graded file. Users can override this
+    # to centralise plots from multiple evals if they want.
+    if output_dir is None:
+        output_dir = graded_path.parent
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Group data points by model. Three parallel dicts because each plot
+    # projects the same source entries onto different (x, y) pairs.
+    # setdefault(model, []).append(...) is the standard one-liner for
+    # "group entries by key into a list".
+    confidence_data = {}         # model → [(mean_confidence, mean_accuracy), ...]
+    stability_data = {}          # model → [(stability, mean_accuracy), ...]
+    stability_filtered = {}      # same, but only pre_query_answered=True
+
+    for entry in graded["results"]:
+        model = entry["model"]
+        s = entry["summary"]
+
+        # Plot 1: confidence on x, accuracy on y.
+        confidence_data.setdefault(model, []).append(
+            (s["mean_confidence"], s["mean_accuracy_of_extracted"])
+        )
+
+        # Plot 2: stability on x, accuracy on y.
+        stability_data.setdefault(model, []).append(
+            (s["stability_of_extracted"], s["mean_accuracy_of_extracted"])
+        )
+
+        # Plot 3: same as plot 2, but only topics where pre_query passed.
+        # This is the "filtered" trend from your LessWrong post — the
+        # high-R² version that includes only topics in the model's
+        # training data coverage.
+        if s["pre_query_answered"]:
+            stability_filtered.setdefault(model, []).append(
+                (s["stability_of_extracted"], s["mean_accuracy_of_extracted"])
+            )
+
+    # Generate the three plots. eval_name in the title makes each plot
+    # self-identifying when viewed in isolation.
+    eval_name = spec.name
+    paths = []
+
+    p1 = output_dir / "accuracy_vs_confidence.png"
+    _plot_scatter_with_trends(
+        confidence_data,
+        x_label="Mean stated confidence (%)",
+        y_label="Mean accuracy of extracted answers",
+        title=f"{eval_name}: Accuracy vs Confidence",
+        output_path=p1,
+        plt=plt, np=np,
+    )
+    paths.append(p1)
+
+    p2 = output_dir / "accuracy_vs_stability.png"
+    _plot_scatter_with_trends(
+        stability_data,
+        x_label="Stability of extracted answers (1 - stdev/mean)",
+        y_label="Mean accuracy of extracted answers",
+        title=f"{eval_name}: Accuracy vs Stability (all topics)",
+        output_path=p2,
+        plt=plt, np=np,
+    )
+    paths.append(p2)
+
+    p3 = output_dir / "accuracy_vs_stability_filtered.png"
+    _plot_scatter_with_trends(
+        stability_filtered,
+        x_label="Stability of extracted answers (1 - stdev/mean)",
+        y_label="Mean accuracy of extracted answers",
+        title=f"{eval_name}: Accuracy vs Stability (pre_query_answered = True)",
+        output_path=p3,
+        plt=plt, np=np,
+    )
+    paths.append(p3)
+
+    return paths
