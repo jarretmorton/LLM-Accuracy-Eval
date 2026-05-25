@@ -43,7 +43,7 @@ SLEEP_BETWEEN_MODELS = 60
 
 # Token budget per response. Large enough for chain-of-thought + answer +
 # confidence statement on the queries this harness was built for.
-MAX_TOKENS = 1000
+MAX_TOKENS = 2500
 
 # Retry budget for transient API errors (429 rate limit, 529 overload).
 MAX_RETRIES = 5
