@@ -103,7 +103,13 @@ def chat(messages, model, system=None, temperature=1.0, stop_sequences=None, web
         raise RuntimeError("Max retries exceeded")
 
     # Web-search responses may mix text and tool-use blocks; keep only text.
-    return " ".join(block.text for block in message.content if block.type == "text")
+    text = " ".join(block.text for block in message.content if block.type == "text")
+    # stop_reason tells us whether the model finished naturally ("end_turn"),
+    # hit a stop sequence ("stop_sequence"), used a tool ("tool_use"), or was
+    # cut off mid-generation by the token cap ("max_tokens"). The grader uses
+    # this to flag truncated responses whose extracted value would reflect an
+    # intermediate calculation rather than a committed answer.
+    return text, message.stop_reason
 
 
 # --- Public API --------------------------
@@ -166,7 +172,7 @@ def run_harness(spec, spec_path) -> Path:
             pre_query_text = spec.queries.pre_query.text.format(league=league, year=year)
             pre_messages = []
             add_user_message(pre_messages, pre_query_text)
-            pre_answer = chat(
+            pre_answer, pre_stop_reason = chat(
                 pre_messages,
                 model=model_name,
                 temperature=spec.temperature,
@@ -183,13 +189,13 @@ def run_harness(spec, spec_path) -> Path:
                 # This is methodologically important for stability measurement.
                 messages = []
                 add_user_message(messages, query_text)
-                answer = chat(
+                answer, stop_reason = chat(
                     messages,
                     model=model_name,
                     temperature=spec.temperature,
                     web_search=spec.queries.query.web_search,
                 )
-                runs.append({"run": i, "answer": answer})
+                runs.append({"run": i, "answer": answer, "stop_reason": stop_reason})
                 print(f"  Run {i}/{spec.runs} done")
                 if i < spec.runs:
                     time.sleep(SLEEP_BETWEEN_RUNS)
@@ -201,6 +207,7 @@ def run_harness(spec, spec_path) -> Path:
                 "year": year,
                 "pre_query": pre_query_text,
                 "pre_answer": pre_answer,
+                "pre_stop_reason": pre_stop_reason,
                 "query": query_text,
                 "n": spec.runs,
                 "runs": runs,

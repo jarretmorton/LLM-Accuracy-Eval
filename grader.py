@@ -99,6 +99,53 @@ def extract_confidence(text):
     return None
 
 
+def is_truncated(answer_text, stop_reason=None):
+    """
+    Return True if `answer_text` looks like a cut-off response.
+
+    Two-tier detection:
+      1. Definitive: if `stop_reason` is provided and equals "max_tokens",
+         the API itself reports that generation was cut off. This is the
+         gold-standard signal and overrides any text inspection.
+      2. Heuristic fallback (used when stop_reason is None — e.g. legacy
+         data from before query.py was updated to capture it): strip trailing
+         whitespace and markdown emphasis markers, then check whether the
+         resulting last character is a completion signal. Completion signals
+         are sentence terminators, closing brackets, closing quotes, and '%'.
+
+    The heuristic catches mid-sentence, mid-table, mid-equation, mid-list,
+    and mid-word truncations (~98% recall on the 120-run validation set)
+    but misses cases where the model happens to finish a sentence before
+    hitting the cap without producing its final answer. Prefer stop_reason
+    whenever it's available.
+    """
+    # Tier 1: API-reported truncation is unambiguous.
+    if stop_reason == "max_tokens":
+        return True
+    # If stop_reason is provided and is anything else ("end_turn",
+    # "stop_sequence", "tool_use"), the API says the generation completed
+    # normally. Trust it and skip the heuristic — the heuristic exists for
+    # legacy data, not as a second-guess on confirmed completions.
+    if stop_reason is not None:
+        return False
+
+    # Tier 2 (legacy data): heuristic over the text itself.
+    stripped = answer_text.rstrip()
+    if not stripped:
+        return True
+    # A trailing fully-closed markdown bold span (e.g. "...**285 hours**")
+    # signals a finished commitment even when no sentence terminator follows.
+    # We require the pair to be intact: a dangling opening "**" without a
+    # close is itself a sign of truncation.
+    if re.search(r"\*\*[^*\n]+\*\*$", stripped):
+        return False
+    # Otherwise: the last visible character must be a sentence terminator,
+    # closing bracket/quote, or a percent sign (for "Confidence: 80%" style
+    # endings). Anything else — letters, digits, operators, table pipes,
+    # commas, continuation markers — suggests cut-off mid-generation.
+    return stripped[-1] not in ".!?\")]'%"
+
+
 def extract_answer(text, unit=None):
     """
     Extract the model's committed numeric answer using a scoring system over
@@ -245,18 +292,33 @@ def extract_answer(text, unit=None):
     return top[-1][2]
 
 
-def grade_run(answer_text, known_answer, unit=None):
+def grade_run(answer_text, known_answer, unit=None, truncated=False):
     """
     Grade a single run: extract the answer and compute accuracy vs truth.
 
+    If `truncated` is True, the run is treated as having no usable answer
+    regardless of what extract_answer would return — any number found in a
+    truncated response is from an intermediate calculation, not the model's
+    committed final answer. Returning None for extracted and accuracy keeps
+    these runs from polluting the downstream means and stdevs.
+
     Returns a dict with:
       - extracted:   the parsed numeric value, or None if extraction failed
+                     or the run was truncated
       - known:       the ground truth value (kept in the output for reference)
       - exact_match: True iff extracted == known
       - accuracy:    1 - abs(extracted - known) / known
                      (1.0 = perfect, 0.0 = 100% off, negative = worse than 100%)
-                     None if extraction failed
+                     None if extraction failed or the run was truncated
     """
+    if truncated:
+        return {
+            "extracted": None,
+            "known": known_answer,
+            "exact_match": False,
+            "accuracy": None,
+        }
+
     extracted = extract_answer(answer_text, unit)
 
     if extracted is None:
@@ -283,6 +345,10 @@ def grade_entry(entry, truth_lookup, unit, refusal_patterns):
 
     `entry` is one element from the raw results['results'] list — has
     keys: model, league, year, pre_query, pre_answer, query, n, runs.
+    Newer entries (post truncation-detection patch) also carry
+    pre_stop_reason on the entry and stop_reason on each run. Legacy
+    entries without these fields fall through to the text heuristic in
+    is_truncated().
 
     Returns a new entry dict with `summary` added and `runs` replaced by
     their graded versions. Preserves the rest of the entry's metadata so
@@ -301,25 +367,42 @@ def grade_entry(entry, truth_lookup, unit, refusal_patterns):
             f"Results file may have been generated from a different spec."
         )
 
-    # Pre-query: True only if the pre-answer contains a recognisable game
-    # score (N-N or comma-separated form). Score presence is the sole signal —
-    # a hedging response with no score is unanswered even if it avoids all
-    # refusal keywords; a confident response must commit to a numeric score.
-    pre_query_answered = has_score(entry["pre_answer"])
+    # Pre-query: True only if the pre-answer (a) wasn't truncated and
+    # (b) contains a recognisable game score (N-N or comma-separated form).
+    # A truncated pre-answer that happens to contain a score-shaped digit
+    # pair somewhere shouldn't count as coverage — the model never finished
+    # what it was saying.
+    pre_truncated = is_truncated(entry["pre_answer"], entry.get("pre_stop_reason"))
+    pre_query_answered = (not pre_truncated) and has_score(entry["pre_answer"])
 
     # Grade each individual run.
     graded_runs = []
     for run in entry["runs"]:
-        graded = grade_run(run["answer"], known_answer, unit)
-        refusal_pattern = find_refusal_pattern(run["answer"], refusal_patterns)
-        # run_refused requires both a matched refusal phrase AND extraction
-        # failure. A run that hedges but still produces a number is answered.
-        run_refused = refusal_pattern is not None and graded["extracted"] is None
+        truncated = is_truncated(run["answer"], run.get("stop_reason"))
+        graded = grade_run(run["answer"], known_answer, unit, truncated=truncated)
+
+        # Truncation, refusal, and successful extraction are mutually
+        # exclusive states. If the run was truncated, we suppress the
+        # refusal-pattern check entirely — phrases like "I could not find"
+        # may appear in mid-thought caveats inside a truncated response, but
+        # the dominant signal is "the response was cut off", not "the model
+        # refused". Refusal patterns only fire on un-truncated runs that
+        # failed to produce an extractable answer.
+        if truncated:
+            refusal_pattern = None
+            run_refused = False
+        else:
+            refusal_pattern = find_refusal_pattern(run["answer"], refusal_patterns)
+            run_refused = refusal_pattern is not None and graded["extracted"] is None
+
         # Confidence is null when no number was extracted — a stated
-        # confidence without an answer isn't meaningful.
+        # confidence without an answer isn't meaningful. (Also null for
+        # truncated runs, since graded["extracted"] is forced to None there.)
         confidence = extract_confidence(run["answer"]) if graded["extracted"] is not None else None
+
         graded_runs.append({
             "run": run["run"],
+            "truncated": truncated,
             "run_refused": run_refused,
             "refusal_pattern": refusal_pattern if run_refused else None,
             **{k: v for k, v in graded.items() if k != "accuracy"},
@@ -329,14 +412,17 @@ def grade_entry(entry, truth_lookup, unit, refusal_patterns):
 
     # --- Summary metrics --------------------------
 
-    # Accuracies from runs where extraction succeeded.
+    # Accuracies from runs where extraction succeeded. Truncated runs were
+    # already nulled out in grade_run, so this filter naturally excludes
+    # them — no extra check needed here.
     valid_accuracies = [r["accuracy"] for r in graded_runs if r["accuracy"] is not None]
     mean_accuracy_of_extracted = (
         round(sum(valid_accuracies) / len(valid_accuracies), 4)
         if valid_accuracies else None
     )
 
-    # Raw extracted numbers from runs where extraction succeeded.
+    # Raw extracted numbers from runs where extraction succeeded (and that
+    # weren't truncated — same filter, by construction).
     valid_extracted = [r["extracted"] for r in graded_runs if r["extracted"] is not None]
     # statistics.stdev requires at least 2 samples.
     stdev_of_extracted = (
@@ -354,6 +440,7 @@ def grade_entry(entry, truth_lookup, unit, refusal_patterns):
         if stdev_of_extracted is not None and mean_of_extracted else None
     )
 
+    runs_truncated = sum(1 for r in graded_runs if r["truncated"])
     runs_with_refusals = sum(1 for r in graded_runs if r["run_refused"])
 
     valid_confidences = [r["confidence"] for r in graded_runs if r["confidence"] is not None]
@@ -364,17 +451,26 @@ def grade_entry(entry, truth_lookup, unit, refusal_patterns):
 
     summary = {
         "pre_query_answered": pre_query_answered,
+        "pre_query_truncated": pre_truncated,
         "runs_graded": len(graded_runs),
         "runs_with_extraction": len(valid_accuracies),
         "runs_with_refusals": runs_with_refusals,
-        "all_runs_accounted_for": (len(valid_accuracies) + runs_with_refusals) == len(graded_runs),
+        "runs_truncated": runs_truncated,
+        # Sanity check: every run should fall into exactly one of three
+        # buckets — extracted-successfully, refused, or truncated. Anything
+        # else is a parse-failure-by-other-means and worth surfacing.
+        "all_runs_accounted_for": (
+            len(valid_accuracies) + runs_with_refusals + runs_truncated
+        ) == len(graded_runs),
         "mean_confidence": mean_confidence,
         "mean_accuracy_of_extracted": mean_accuracy_of_extracted,
         "stability_of_extracted": stability_of_extracted,
     }
 
     # Return a new entry mirroring the input shape with summary + graded runs.
-    return {
+    # pre_stop_reason is preserved on the way through so the graded file
+    # carries the same provenance as the raw input.
+    out = {
         "model": entry["model"],
         "league": league,
         "year": year,
@@ -385,6 +481,9 @@ def grade_entry(entry, truth_lookup, unit, refusal_patterns):
         "summary": summary,
         "runs": graded_runs,
     }
+    if "pre_stop_reason" in entry:
+        out["pre_stop_reason"] = entry["pre_stop_reason"]
+    return out
 
 
 # --- Public API --------------------------
