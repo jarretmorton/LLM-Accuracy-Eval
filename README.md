@@ -4,7 +4,7 @@
 
 LLM Accuracy Eval is the runnable companion to the LessWrong post [*A Black-Box Procedure for LLM Confidence in Critical Applications*](https://www.lesswrong.com/posts/unaLT4A6hSTCLNGod/a-black-box-procedure-for-llm-confidence-in-critical#comments). The post argued that for critical-application use of LLMs, two black-box signals are tractable and useful: (1) **training coverage**, estimated by asking secondary questions with web search disabled and observing whether the model refuses; and (2) **answer stability**, measured by running the same query repeatedly and comparing responses.
 
-This repo will turn that procedure into a CLI and a YAML-spec-driven eval format that can be pointed at any chat-completion API. v0.1 is a scripted prototype that demonstrates the methodology end-to-end on a sports-league dataset.
+This repo will turn that procedure into a CLI and a YAML-spec-driven eval format that can be pointed at any chat-completion API. v0.2 is a functioning system allowing multiple runs and multiple models to be used over several topics. Includes functionality for identifying truncated replies, flagging refusals, plots main outputs evaluated in the post above (confidecne vs accuracy, stability vs accuracy and filtered stability vs accuracy).
 
 ## Thesis
 
@@ -19,8 +19,8 @@ The implication is that any team deploying LLMs in critical applications can get
 
 A small Python package that:
 
-- Reads a JSON ground-truth file plus a Python list in `eval.py` (YAML eval spec planned).
-- Runs the prompt N times against one model, serially (multi-model parallel runs planned).
+- Reads a YAML spec that includes pre-query, query, ground-truth, model temperature, and grader type along with refusal paterns.
+- Runs the prompt N times against up to 3 models, serially.
 - Computes stability and accuracy metrics.
 - Emits structured JSON results for downstream analysis.
 
@@ -33,6 +33,8 @@ Not a benchmark. Not a leaderboard. Not a replacement for HELM or lm-eval-harnes
 ## Status
 
 v0.1 — bare driver and grader implemented; YAML-spec layer and coverage-check step deferred.
+
+v0.2 - fully functional system. YAML spec input, JSON and plot output comparing directly to lesswrong findings.
 
 ## License
 
