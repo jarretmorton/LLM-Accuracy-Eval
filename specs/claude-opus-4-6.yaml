@@ -18,6 +18,7 @@ description: >
 # Models to run against. Strings are passed verbatim to the provider.
 models:
 #  - claude-haiku-4-5
+#  - claude-sonnet-4-6
   - claude-opus-4-6
 #  - claude-opus-4-7
 
@@ -47,7 +48,6 @@ grader:
   - "I cannot find"
   - "I cannot provide"
   - "I could not find"
-  - "I could not"
   - "I'm not sure"
   - "I don't know"
   - "I don't have information about"
@@ -59,6 +59,7 @@ grader:
   - "did not return any source"
   - "could not be found"
   - "I don't have reliable information"
+  - "training data"
 
 # defines leagues, year, and truth for that league in that year
 topics:
