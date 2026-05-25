@@ -1,44 +1,68 @@
 """
-llm-accuracy-eval main entry point.
+llm-accuracy-eval — main entry point.
 
-This file ties together three independent modules:
+Orchestrates three independent modules:
 
     spec.py    — parses YAML eval specs into a typed config object
-    query.py   — runs the harness against the API and writes raw results
-    grader.py  — reads raw results, computes accuracy/stability, writes graded results
+    query.py   — runs the eval harness against the Claude API, writes raw results
+    grader.py  — reads raw results, computes accuracy/stability metrics, writes
+                 graded results and plots
 
-Each module is independently usable. This file just orchestrates them based
-on user intent expressed via CLI subcommands:
+Each module is independently usable. This file chains them together based on
+the subcommand the user picks. Run `python main.py --help` for a full list.
 
-    llm-accuracy-eval run specs/example.yaml        # full pipeline
-    llm-accuracy-eval collect specs/example.yaml    # harness only (uses API, no grading)
-    llm-accuracy-eval grade results/example.json specs/example.yaml   # grader only (no API)
+Available commands
+------------------
+run     <spec.yaml>
+    Full pipeline: load spec → call API → grade → plot.
+    Most common entry point. Produces a raw results JSON, a graded JSON, and
+    three accuracy plots, all named after the spec file.
 
-The `grade` subcommand is the value-add of keeping the modules separate —
-it lets anyone re-grade your published results without spending API tokens.
+    Example:
+        python main.py run specs/claude-sonnet-4-6.yaml
+
+collect <spec.yaml>
+    Harness only — calls the API and writes raw results but skips grading.
+    Use when you want to defer grading (e.g. the grader is still being tuned)
+    or capture results for later analysis.
+
+    Example:
+        python main.py collect specs/claude-sonnet-4-6.yaml
+
+grade   <results.json> <spec.yaml>
+    Grader only — no API calls. Reads an existing raw results file, computes
+    metrics, writes a graded JSON and plots. Use to re-grade published results
+    after changing the grader, or to verify someone else's numbers.
+
+    Example:
+        python main.py grade results/claude-sonnet-4-6.json specs/claude-sonnet-4-6.yaml
+
+plot    [results_dir]
+    Combined plots — merges every *_graded.json in the given directory (default:
+    results/) and generates a single set of plots with all models overlaid.
+    Writes combined_graded.json and three combined_* PNG files to the same
+    directory. Does not call the API or re-grade anything.
+
+    Example:
+        python main.py plot
+        python main.py plot results/
 """
 
 # --- Imports --------------------------
 
-# argparse is Python's standard library CLI parser. It handles --flags,
-# positional arguments, subcommands, and produces --help text automatically.
-import argparse
+import argparse       # CLI parser: subcommands, positional args, --help
+import json           # reading/writing graded JSON for the `plot` command
+import sys            # sys.exit() for clean error termination
+from pathlib import Path            # object-oriented file paths
+from types import SimpleNamespace   # lightweight object used as a stand-in spec
+                                    # for the `plot` command (needs only .name)
 
-# sys gives us sys.exit() — the conventional way to terminate a program with
-# an exit code. 0 = success, non-zero = failure (shell scripts check this).
-import sys
-
-# pathlib provides an object-oriented path API. Path("a/b").exists(),
-# Path("foo.json").with_name("foo_graded.json"), etc. — cleaner than os.path
-# and treats paths as objects rather than strings.
-from pathlib import Path
-
-# Import the three modules we orchestrate. Each exposes the function(s) we
-# need via its public API. The modules don't know about each other — only
-# this file knows how to chain them. That's the separation we wanted.
-from spec import load_spec        # load_spec(path: str) -> Spec
-from query import run_harness     # run_harness(spec: Spec) -> Path
-from grader import grade_results, generate_plots  # grade_results(results_path: Path, spec: Spec) -> Path
+# The three modules this file orchestrates. They don't know about each other —
+# only main.py knows how to chain them.
+from spec import load_spec                        # load_spec(path) -> Spec
+from query import run_harness                     # run_harness(spec, spec_path) -> Path
+from grader import grade_results, generate_plots  # grade_results(path, spec) -> Path
+                                                  # generate_plots(path, spec) -> list[Path]
 
 
 # --- Subcommand handlers --------------------------
@@ -49,30 +73,33 @@ from grader import grade_results, generate_plots  # grade_results(results_path: 
 
 def cmd_run(args: argparse.Namespace) -> None:
     """
-    Full pipeline: parse spec → run harness → grade results.
+    Full pipeline: load spec → call API → grade → generate plots.
 
-    The most common entry point. A reviewer running your code once gets
-    both raw API outputs and graded metrics.
+    Most common entry point. Produces three output files all named after the
+    spec: a raw results JSON, a graded JSON, and three accuracy PNG plots.
+    This is the expensive path — it makes live API calls and waits for
+    rate-limit cooldowns between runs.
     """
-    # Step 1: Load and validate the YAML spec. If anything's missing or
-    # malformed, spec.py raises an exception and we exit here with a clear
-    # error — better than crashing partway through an expensive run.
+    # Step 1: Load and validate the YAML spec. Fails fast if anything is
+    # missing or malformed — better than crashing partway through an API run.
     spec = load_spec(args.spec_path)
     print(f"Loaded spec: {spec.name} v{spec.version}")
 
-    # Step 2: Run the harness. This is the expensive step — API calls plus
-    # rate-limit waits. Writes raw results to the path declared in spec.output.
+    # Step 2: Run the harness. API calls + rate-limit sleeps happen here.
+    # The output filename is derived from the spec filename, not spec.output.path,
+    # so claude-sonnet-4-6.yaml → results/claude-sonnet-4-6.json.
     print(f"Running harness — {len(spec.models)} model(s), "
           f"{len(spec.topics)} topic(s), n={spec.runs}")
     results_path = run_harness(spec, args.spec_path)
     print(f"Raw results written → {results_path}")
 
-    # Step 3: Grade. Pure local computation — no API calls, no waiting.
-    # Reads the raw results file written in Step 2.
+    # Step 3: Grade. No API calls — pure local computation over the JSON
+    # written in Step 2. Appends _graded to the filename.
     print("Grading results...")
     graded_path = grade_results(results_path, spec)
     print(f"Graded results written → {graded_path}")
 
+    # Step 4: Generate the three accuracy plots alongside the graded file.
     print("Generating plots...")
     plot_paths = generate_plots(graded_path, spec)
     for p in plot_paths:
@@ -81,10 +108,11 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 def cmd_collect(args: argparse.Namespace) -> None:
     """
-    Harness only: parse spec → run harness → write raw results.
+    Harness only: load spec → call API → write raw results (no grading).
 
-    Use when you want to capture results but defer grading (grader is still
-    being iterated on, or you want to grade differently later).
+    Use when you want to capture API responses but defer grading — for example
+    if the grader is still being tuned, or you want to grade with different
+    specs later. Prints the exact `grade` command to run when ready.
     """
     spec = load_spec(args.spec_path)
     print(f"Loaded spec: {spec.name} v{spec.version}")
@@ -95,19 +123,70 @@ def cmd_collect(args: argparse.Namespace) -> None:
     print(f"(Skipping grading — run `grade {results_path} {args.spec_path}` when ready)")
 
 
+def cmd_plot(args: argparse.Namespace) -> None:
+    """
+    Combined plots: merge all *_graded.json files in a directory and generate
+    a single set of plots with every model's data overlaid on the same axes.
+
+    No API calls are made and nothing is re-graded. The command:
+      1. Finds every *_graded.json in results_dir (skipping combined_graded.json
+         itself so re-running doesn't double-count).
+      2. Merges their results arrays into combined_graded.json.
+      3. Generates three plots prefixed with 'combined_' so they sit alongside
+         the single-model plots without overwriting them.
+    """
+    results_dir = Path(args.results_dir)
+    if not results_dir.exists():
+        sys.exit(f"Error: results directory not found: {results_dir}")
+
+    combined_filename = "combined_graded.json"
+    # Collect all per-model graded files, excluding the combined output itself
+    # so re-running the command doesn't fold last run's combined data back in.
+    graded_files = sorted(
+        p for p in results_dir.glob("*_graded.json")
+        if p.name != combined_filename
+    )
+
+    if not graded_files:
+        sys.exit(f"No *_graded.json files found in {results_dir}")
+
+    # Merge the results arrays from every graded file into a single list.
+    print(f"Combining {len(graded_files)} graded file(s):")
+    combined_results = []
+    for p in graded_files:
+        print(f"  {p.name}")
+        with open(p) as f:
+            combined_results.extend(json.load(f)["results"])
+
+    # Write the merged data so generate_plots has a file to read from.
+    combined_path = results_dir / combined_filename
+    with open(combined_path, "w") as f:
+        json.dump({"spec_name": "combined", "results": combined_results}, f, indent=2)
+    print(f"Combined graded data written → {combined_path}")
+
+    # Use a minimal stand-in spec — generate_plots only needs spec.name for
+    # plot titles; everything else comes from the graded JSON.
+    print("Generating combined plots...")
+    spec = SimpleNamespace(name="All Models")
+    plot_paths = generate_plots(combined_path, spec)
+    for p in plot_paths:
+        print(f"  Wrote {p}")
+
+
 def cmd_grade(args: argparse.Namespace) -> None:
     """
-    Grader only: read raw results → compute metrics → write graded results.
+    Grader only: read an existing raw results JSON → compute metrics → write
+    graded results and plots. No API calls are made.
 
-    No API calls. Re-grade existing results after a grader change, or verify
-    someone else's published numbers. Requires the spec for grading context
-    (refusal patterns, truth values, expected unit).
+    Use to re-grade after changing grader logic, or to verify someone else's
+    published raw results without spending tokens. Requires the original spec
+    for grading context: truth values, expected unit, and refusal patterns.
     """
     spec = load_spec(args.spec_path)
     results_path = Path(args.results_path)
 
-    # Sanity check before we try to read the file — clearer error than
-    # letting open() throw FileNotFoundError from inside the grader.
+    # Check the file exists before entering the grader — gives a clearer
+    # error message than a raw FileNotFoundError from inside grade_results.
     if not results_path.exists():
         sys.exit(f"Error: results file not found: {results_path}")
 
@@ -125,55 +204,64 @@ def cmd_grade(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     """
-    Construct the argparse parser with subcommands.
+    Construct the argparse parser with all four subcommands.
 
-    argparse subcommands work like git: `git commit -m ...` has `commit` as
-    the subcommand and `-m ...` as flags. Same shape here:
-    `llm-accuracy-eval run specs/example.yaml` has `run` as the subcommand
-    and `specs/example.yaml` as a positional argument.
+    Works like git: the subcommand name comes first, then its arguments.
+    For example:
+        python main.py run specs/claude-sonnet-4-6.yaml
 
-    Pulled into its own function so it's testable in isolation and the
-    structure is easy to scan.
+    Pulled into its own function so it's independently testable and easy
+    to scan when adding new subcommands.
     """
-    # Top-level parser describes the program itself.
     parser = argparse.ArgumentParser(
         prog="llm-accuracy-eval",
         description="Black-box evaluation harness for measuring LLM accuracy and stability.",
     )
 
-    # add_subparsers creates the subcommand machinery. dest="command" tells
-    # argparse where to store the chosen subcommand name, so we can dispatch
-    # on it below. required=True forces the user to pick one (otherwise
-    # running with no args silently does nothing).
+    # dest="command" stores the chosen subcommand name on args so the dispatch
+    # table in main() can look up the right handler. required=True means the
+    # user must pick a subcommand — no silent no-op on bare invocation.
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # --- `run` subcommand ---
-    # Each subparser is itself an ArgumentParser with its own arguments.
+    # Full pipeline: spec → API → grade → plots. Most common entry point.
     run_parser = subparsers.add_parser(
         "run",
-        help="Run the full pipeline (harness + grader) from a YAML spec.",
+        help="Full pipeline: call API, grade results, and generate plots.",
     )
-    # Positional argument — required, no flag prefix. User invokes as:
-    #     llm-accuracy-eval run specs/example.yaml
-    # The string "spec_path" becomes args.spec_path inside the handler.
     run_parser.add_argument("spec_path", help="Path to the YAML eval spec.")
 
     # --- `collect` subcommand ---
+    # API calls only — skips grading. Output filename is derived from spec name.
     collect_parser = subparsers.add_parser(
         "collect",
-        help="Run the harness only (no grading). Useful for deferred grading.",
+        help="Call the API and save raw results only (no grading or plots).",
     )
     collect_parser.add_argument("spec_path", help="Path to the YAML eval spec.")
 
     # --- `grade` subcommand ---
-    # This one takes two positional arguments. Order matters — argparse
-    # assigns them by position in the command line.
+    # Re-grade an existing raw results file with no API calls.
+    # Two positional arguments — order matters (results first, then spec).
     grade_parser = subparsers.add_parser(
         "grade",
-        help="Grade existing raw results (no API calls).",
+        help="Grade existing raw results and generate plots (no API calls).",
     )
     grade_parser.add_argument("results_path", help="Path to the raw results JSON file.")
-    grade_parser.add_argument("spec_path", help="Path to the YAML eval spec (for grader context).")
+    grade_parser.add_argument("spec_path", help="Path to the YAML eval spec (provides truth values and grader config).")
+
+    # --- `plot` subcommand ---
+    # Merge all *_graded.json files in a directory into combined plots.
+    # results_dir is optional — defaults to results/ if omitted.
+    plot_parser = subparsers.add_parser(
+        "plot",
+        help="Merge all graded results in a directory and generate combined plots.",
+    )
+    plot_parser.add_argument(
+        "results_dir",
+        nargs="?",
+        default="results",
+        help="Directory containing *_graded.json files (default: results/).",
+    )
 
     return parser
 
@@ -184,39 +272,31 @@ def main() -> None:
     """
     Parse CLI args and dispatch to the right subcommand handler.
 
-    The pattern (parse → dispatch dict → call handler) is standard for any
-    CLI tool with multiple subcommands. The alternative — a chain of
-    if/elif on args.command — works but doesn't scale as well.
+    Uses a dispatch table (dict) rather than if/elif chains — adding a new
+    subcommand is one line here plus one subparser in build_parser().
     """
     parser = build_parser()
     args = parser.parse_args()
 
-    # Dispatch table: maps subcommand name to its handler function.
-    # Adding a new subcommand is a one-line change here plus adding the
-    # subparser above.
+    # Dispatch table: subcommand name → handler function.
     handlers = {
-        "run": cmd_run,
+        "run":     cmd_run,
         "collect": cmd_collect,
-        "grade": cmd_grade,
+        "grade":   cmd_grade,
+        "plot":    cmd_plot,
     }
 
-    handler = handlers[args.command]
-
-    # Wrap the handler in try/except so we catch errors from any subcommand
-    # and exit with a clean message instead of dumping a Python traceback
-    # on the user. Tracebacks are useful for debugging but ugly for end
-    # users; if you want them while developing, comment out the except
-    # blocks temporarily.
     try:
-        handler(args)
+        handlers[args.command](args)
     except FileNotFoundError as e:
         sys.exit(f"Error: file not found — {e.filename}")
     except KeyboardInterrupt:
-        # User pressed Ctrl+C. Exit cleanly without a traceback.
+        # Ctrl+C — exit without a traceback.
         sys.exit("\nInterrupted by user")
     except Exception as e:
-        # Catch-all for unexpected errors. Print the message and exit
-        # non-zero so shell scripts wrapping this tool can detect failure.
+        # Any other error: print the message and exit non-zero so shell
+        # scripts wrapping this tool can detect failure. Comment out this
+        # block temporarily if you need the full traceback while debugging.
         sys.exit(f"Error: {e}")
 
 
