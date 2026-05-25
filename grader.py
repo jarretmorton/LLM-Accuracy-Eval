@@ -82,46 +82,149 @@ def extract_confidence(text):
     return None
 
 
-def extract_last_number(text, unit=None):
+def extract_answer(text, unit=None):
     """
-    Extract the last numeric value from `text`, optionally requiring it to
-    be paired with `unit` (e.g., "1,400 hours").
+    Uses a scoring system over
+    all `<num> <unit>` matches in the text, where score reflects the strength
+    of "this is the model's committed answer" markers.
 
-    Strategy:
-      - Strip percentage values first so confidence numbers aren't matched.
-      - If `unit` is given, prefer a range paired with the unit (return
-        the midpoint), then fall back to the last single number paired
-        with the unit.
-      - If `unit` is None, return the last number found anywhere.
+    Scoring:
+    +2 if inside markdown bold AND the bold span contains a label keyword
+        ('total' / 'grand total' / 'answer' / 'final answer')
+    +2 if on the same line as a label keyword
+    +1 if inside markdown bold (but no label nearby)
+    +1 if immediately preceded by '=' or '≈'
+    0 otherwise
 
-    Returns None if no matching number is found.
+    Selection: take the highest-scoring tier; within that tier, take the FIRST
+    candidate (so the primary commitment beats later hedged alternatives like
+    'the answer would be roughly...'). If the chosen match falls inside a
+    numeric range '<low>-<high> <unit>', return the midpoint.
+
+    Cross-tier filter: any '<num> <unit>' immediately followed by 'per <word>'
+    is a rate and skipped — handles 'X hours per match' etc.
     """
-    # Strip percentage values (e.g., "15%", "25-30%") so confidence
-    # numbers are never matched as the answer.
-    text = re.sub(r'\d+(?:\.\d+)?\s*(?:[-–]\s*\d+(?:\.\d+)?)?\s*%', '', text)
 
-    if unit:
-        # Check for a range paired with the unit (e.g., "778-788 hours") —
-        # return the average of the bounds.
-        range_matches = re.findall(
-            rf'\b(\d+(?:,\d+)*(?:\.\d+)?)\s*[-–]\s*(\d+(?:,\d+)*(?:\.\d+)?)\s+{unit}s?\b',
-            text, re.IGNORECASE
-        )
-        if range_matches:
-            low, high = range_matches[-1]
-            return round((float(low.replace(",", "")) + float(high.replace(",", ""))) / 2, 4)
-        # Numbers immediately followed by the unit word (singular or plural).
-        matches = re.findall(
-            rf'\b(\d+(?:,\d+)*(?:\.\d+)?)\s+{unit}s?\b',
-            text, re.IGNORECASE
-        )
-    else:
-        matches = re.findall(r'\b\d+(?:,\d+)*(?:\.\d+)?\b', text)
+    import re
 
-    if not matches:
+
+    def extract_answer(text, unit="hour"):
+        """Extract the model's committed numeric answer from a free-form response."""
+        # Strip percentages so confidence numbers can't be matched as the answer.
+        text = re.sub(r"\d+(?:\.\d+)?\s*(?:[-–]\s*\d+(?:\.\d+)?)?\s*%", "", text)
+
+    num_pat = r"(\d+(?:,\d+)*(?:\.\d+)?)"
+    unit_pat = rf"{unit}s?"
+
+    def to_float(s):
+        return float(s.replace(",", ""))
+
+    # --- Precompute structural info --------------------------
+
+    # Line boundaries — needed for "same line as label" scoring.
+    line_starts = [0] + [m.end() for m in re.finditer(r"\n", text)]
+
+    def line_bounds(pos):
+        """(start, end) of the line containing `pos`."""
+        line_start = max((s for s in line_starts if s <= pos), default=0)
+        line_end_m = re.search(r"\n", text[pos:])
+        line_end = pos + line_end_m.start() if line_end_m else len(text)
+        # actual line end starts after pos; widen to whole line
+        end_from_start = re.search(r"\n", text[line_start:])
+        if end_from_start:
+            return line_start, line_start + end_from_start.start()
+        return line_start, len(text)
+
+    # Bold spans — markdown **...**. Track each span as (start, end).
+    bold_spans = []
+    for m in re.finditer(r"\*\*([^*\n]+?)\*\*", text):
+        bold_spans.append((m.start(), m.end()))
+
+    def in_bold(pos):
+        for bs, be in bold_spans:
+            if bs <= pos < be:
+                return (bs, be)
         return None
-    # Remove commas from numbers like "1,400" before converting to float.
-    return float(matches[-1].replace(",", ""))
+
+    # Label-keyword positions.
+    label_re = re.compile(r"\b(?:grand\s+total|final\s+answer|total|answer)\b", re.IGNORECASE)
+    label_positions = [m.start() for m in label_re.finditer(text)]
+
+    def label_on_line(pos):
+        """True if any label keyword occurs on the same line as `pos`."""
+        ls, le = line_bounds(pos)
+        return any(ls <= lp < le for lp in label_positions)
+
+    # --- Build candidate list --------------------------
+
+    # Each candidate: (score, position, value, range_midpoint_if_any)
+    # range_midpoint_if_any: if the candidate is part of "<low>-<high> <unit>",
+    # use the midpoint instead of the matched value.
+    candidates = []
+
+    # Pre-scan ranges so we can prefer midpoints when a range is detected.
+    # Maps the .end() of the LAST num in a range to the midpoint value.
+    range_endpoints = {}
+    for m in re.finditer(
+        rf"\b{num_pat}\s*(?:[-–]|\s+to\s+)\s*{num_pat}\s+{unit_pat}\b",
+        text,
+        re.IGNORECASE,
+    ):
+        low_s, high_s = m.group(1), m.group(2)
+        midpoint = round((to_float(low_s) + to_float(high_s)) / 2, 4)
+        range_endpoints[m.end()] = midpoint
+
+    for m in re.finditer(rf"\b{num_pat}\s+{unit_pat}\b", text, re.IGNORECASE):
+        # Rate filter: "<num> <unit> per <word>" is a rate, skip.
+        tail = text[m.end() : m.end() + 25]
+        if re.match(r"\s+per\s+\w", tail, re.IGNORECASE):
+            continue
+
+        value = to_float(m.group(1))
+        # If this match is the high end of a range, prefer the midpoint.
+        if m.end() in range_endpoints:
+            value = range_endpoints[m.end()]
+
+        pos = m.start()
+        bold_info = in_bold(pos)
+        in_label_line = label_on_line(pos)
+        # Equals-sign signal: look back ~5 chars for '=' or '≈'.
+        prefix = text[max(0, pos - 5) : pos]
+        has_eq = bool(re.search(r"[=≈]\s*~?\s*$", prefix))
+
+        # Score.
+        if bold_info and label_re.search(text[bold_info[0] : bold_info[1]]):
+            # Bold span itself contains a label keyword. Strongest signal —
+            # this is the model's bolded answer-declaration.
+            score = 4
+        elif in_label_line and bold_info:
+            score = 3
+        elif in_label_line:
+            score = 2
+        elif bold_info:
+            score = 2
+        elif has_eq:
+            score = 1
+        else:
+            score = 0
+
+        candidates.append((score, pos, value, bold_info))
+
+    if not candidates:
+        return None
+
+    # --- Resolve --------------------------
+
+    max_score = max(c[0] for c in candidates)
+    top = [c for c in candidates if c[0] == max_score]
+
+    # Within the top tier, prefer the LAST candidate. Rationale: when the
+    # model gives an intermediate "Total: X" early and refines to a final
+    # "Estimated Total: Y" later, Y is the committed answer. Hedged
+    # alternatives ("the answer would be roughly...") rarely tie at the
+    # top tier because they lack the strong markers (bold-with-label-
+    # inside, or "Grand total:" prefix) that the primary commitment has.
+    return top[-1][2]
 
 
 def grade_run(answer_text, known_answer, unit=None):
@@ -136,7 +239,7 @@ def grade_run(answer_text, known_answer, unit=None):
                      (1.0 = perfect, 0.0 = 100% off, negative = worse than 100%)
                      None if extraction failed
     """
-    extracted = extract_last_number(answer_text, unit)
+    extracted = extract_answer(answer_text, unit)
 
     if extracted is None:
         return {
