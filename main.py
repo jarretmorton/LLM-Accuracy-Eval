@@ -11,7 +11,7 @@ Each module is independently usable. This file just orchestrates them based
 on user intent expressed via CLI subcommands:
 
     llm-accuracy-eval run specs/example.yaml        # full pipeline
-    llm-accuracy-eval collect specs/example.yaml    # harness only uses API (no grading)
+    llm-accuracy-eval collect specs/example.yaml    # harness only (uses API, no grading)
     llm-accuracy-eval grade results/example.json specs/example.yaml   # grader only (no API)
 
 The `grade` subcommand is the value-add of keeping the modules separate —
