@@ -577,7 +577,7 @@ def generate_plots(graded_path, spec, output_dir=None):
     stem = graded_path.stem
     file_prefix = stem[: -len("_graded")] if stem.endswith("_graded") else stem
 
-    p1 = output_dir / f"{file_prefix} accuracy_vs_confidence.png"
+    p1 = output_dir / f"{file_prefix}_accuracy_vs_confidence.png"
     _plot_scatter_with_trends(
         confidence_data,
         x_label="Mean stated confidence (%)",
@@ -588,7 +588,7 @@ def generate_plots(graded_path, spec, output_dir=None):
     )
     paths.append(p1)
 
-    p2 = output_dir / f"{file_prefix} accuracy_vs_stability.png"
+    p2 = output_dir / f"{file_prefix}_accuracy_vs_stability.png"
     _plot_scatter_with_trends(
         stability_data,
         x_label="Stability of extracted answers (1 - stdev/mean)",
@@ -599,7 +599,7 @@ def generate_plots(graded_path, spec, output_dir=None):
     )
     paths.append(p2)
 
-    p3 = output_dir / f"{file_prefix} accuracy_vs_stability_filtered.png"
+    p3 = output_dir / f"{file_prefix}_accuracy_vs_stability_filtered.png"
     _plot_scatter_with_trends(
         stability_filtered,
         x_label="Stability of extracted answers (1 - stdev/mean)",
