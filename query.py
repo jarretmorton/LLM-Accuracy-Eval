@@ -108,7 +108,7 @@ def chat(messages, model, system=None, temperature=1.0, stop_sequences=None, web
 
 # --- Public API --------------------------
 
-def run_harness(spec) -> Path:
+def run_harness(spec, spec_path) -> Path:
     """
     Run the eval harness defined by `spec`.
 
@@ -136,9 +136,13 @@ def run_harness(spec) -> Path:
     (dataclass, SimpleNamespace, pydantic model, etc.). If you go with
     plain dicts in spec.py, swap the dotted access for bracket access.
     """
-    # Ensure the output directory exists BEFORE we start spending tokens.
-    # Better to fail fast on a missing directory than after a 30-minute run.
-    output_path = Path(spec.output.path)
+    # Derive the output filename from the spec file's stem so the results
+    # file is always named after the spec that produced it (e.g.
+    # claude-sonnet-4-6.yaml → results/claude-sonnet-4-6.json).
+    # The directory still comes from spec.output.path so the YAML controls
+    # where files land without hard-coding the name.
+    output_dir = Path(spec.output.path).parent
+    output_path = output_dir / (Path(spec_path).stem + ".json")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Collect every (model, topic) block in memory and write once at the end.

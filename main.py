@@ -64,7 +64,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     # rate-limit waits. Writes raw results to the path declared in spec.output.
     print(f"Running harness — {len(spec.models)} model(s), "
           f"{len(spec.topics)} topic(s), n={spec.runs}")
-    results_path = run_harness(spec)
+    results_path = run_harness(spec, args.spec_path)
     print(f"Raw results written → {results_path}")
 
     # Step 3: Grade. Pure local computation — no API calls, no waiting.
@@ -90,7 +90,7 @@ def cmd_collect(args: argparse.Namespace) -> None:
     print(f"Loaded spec: {spec.name} v{spec.version}")
     print(f"Running harness — {len(spec.models)} model(s), "
           f"{len(spec.topics)} topic(s), n={spec.runs}")
-    results_path = run_harness(spec)
+    results_path = run_harness(spec, args.spec_path)
     print(f"Raw results written → {results_path}")
     print(f"(Skipping grading — run `grade {results_path} {args.spec_path}` when ready)")
 
