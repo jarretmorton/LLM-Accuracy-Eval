@@ -1,6 +1,6 @@
 # System Prompts
 
-> **Status:** v0.1 — no LLM prompts used by the current grader (`grader.py` is regex-based). The judge prompt below is a draft for the `judge` grader mode planned in a future release.
+> **Status:** v0.2 — no LLM prompts used by the current grader (`grader.py` is regex-based). The judge prompt below is a draft for the `judge` grader mode planned in a future release. Considering using system prompts that mandate structure in the response to make it easier for the numerical grader (max tokens, final answer format and location for pre-query, query, and confidence responses)
 
 ---
 
@@ -39,5 +39,7 @@ Do not output anything outside the JSON object.
 ## Open design questions
 
 - **Agreement vs. correctness in the judge prompt.** The judge prompt above grades correctness against ground truth, not agreement between responses. The current methodology supports this directly — each run is graded against truth independently, and stability is derived from the per-run accuracies. The agreement-grading variant is not needed.
+    - Current thought is I would use a judge to check numeric grading, and implement a system prompt for better reply structure to make numeric grading easier.
 - **Coverage-check refusal vs. in-the-wild refusal.** Open for when the coverage check lands in v0.2. Worth deciding whether the harness should distinguish a refusal from the coverage check (training-data signal) from a refusal during the primary query (semantic stability signal).
+    - Yes both need to be tracked. A refusal in the coverage check via the pre-query is used for the stability filter. Refusal in the primary query must be sorted from truncation, and then excluded from calculations.
 - **Judge model independence.** When `grader: judge`, `judge_model` must not appear in `models`. Grading by a model in the same family as the model under test introduces a known bias. The spec validator will reject configurations that violate this rule; the README will document it.
