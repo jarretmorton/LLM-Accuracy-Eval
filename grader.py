@@ -48,6 +48,20 @@ def is_refusal(text, patterns):
     return any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
 
+def find_refusal_pattern(text, patterns):
+    """
+    Return the first refusal pattern that matches `text`, or None.
+
+    Same matching logic as is_refusal — case-insensitive re.search — but
+    returns the pattern string itself so callers can record which pattern
+    triggered the refusal flag rather than just that one did.
+    """
+    for p in patterns:
+        if re.search(p, text, re.IGNORECASE):
+            return p
+    return None
+
+
 def extract_confidence(text):
     """
     Extract a confidence percentage from the response text.
@@ -179,13 +193,14 @@ def grade_entry(entry, truth_lookup, unit, refusal_patterns):
         # of whether a number was extracted. By design — a refused-but-
         # extracted run gets flagged by the all_runs_accounted_for check
         # in the summary below.
-        run_refused = is_refusal(run["answer"], refusal_patterns)
+        refusal_pattern = find_refusal_pattern(run["answer"], refusal_patterns)
         # Confidence is null when no number was extracted — a stated
         # confidence without an answer isn't meaningful.
         confidence = extract_confidence(run["answer"]) if graded["extracted"] is not None else None
         graded_runs.append({
             "run": run["run"],
-            "run_refused": run_refused,
+            "run_refused": refusal_pattern is not None,
+            "refusal_pattern": refusal_pattern,
             **{k: v for k, v in graded.items() if k != "accuracy"},
             "confidence": confidence,
             "accuracy": graded["accuracy"],
