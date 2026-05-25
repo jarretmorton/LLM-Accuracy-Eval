@@ -7,8 +7,8 @@ For each (model, topic) block in the raw results file, compute:
   - Mean accuracy across runs (excluding non-extractions)
   - Standard deviation and mean of extracted values
   - Stability (1 - stdev/mean of extracted values)
-  - Per-run refusal flag (from spec.grader.refusal_patterns)
-  - Pre-query refusal flag
+  - Per-run refusal flag and the matched refusal pattern (from spec.grader.refusal_patterns)
+  - Pre-query answered flag (True only if the pre-answer contains a recognisable game score)
   - Mean confidence across runs that produced both an answer and a confidence
 
 Writes a single consolidated graded JSON file alongside the source, with
@@ -17,6 +17,7 @@ graded versions and a `summary` block added.
 
 Public API:
     grade_results(results_path: Path, spec) -> Path
+    generate_plots(graded_path: Path, spec, output_dir: Path | None) -> list[Path]
 """
 
 # --- Imports --------------------------
@@ -62,6 +63,22 @@ def find_refusal_pattern(text, patterns):
     return None
 
 
+def has_score(text):
+    """True if `text` contains a final-game-score commitment.
+
+    Recognizes two forms:
+      A) N-N / N–N (hyphen or en-dash) — both numbers ≤ 3 digits, so
+         year ranges like "2022-23" cannot trigger a match.
+      B) N, <team-words> N — comma-separated form with the second team
+         name (1–5 words) between the comma and the closing number.
+    """
+    if re.search(r'\b\d{1,3}\s*[-–]\s*\d{1,3}\b', text):
+        return True
+    if re.search(r'\b\d{1,3},\s+\w+(?:\s+\w+){0,4}\s+\d{1,3}\b', text):
+        return True
+    return False
+
+
 def extract_confidence(text):
     """
     Extract a confidence percentage from the response text.
@@ -84,34 +101,35 @@ def extract_confidence(text):
 
 def extract_answer(text, unit=None):
     """
-    Uses a scoring system over
+    Extract the model's committed numeric answer using a scoring system over
     all `<num> <unit>` matches in the text, where score reflects the strength
     of "this is the model's committed answer" markers.
 
     Scoring:
-    +2 if inside markdown bold AND the bold span contains a label keyword
+    +4 if inside markdown bold AND the bold span contains a label keyword
         ('total' / 'grand total' / 'answer' / 'final answer')
-    +2 if on the same line as a label keyword
-    +1 if inside markdown bold (but no label nearby)
+    +3 if on the same line as a label keyword AND inside bold
+    +2 if on the same line as a label keyword (no bold required)
+    +2 if inside markdown bold (but no label nearby)
     +1 if immediately preceded by '=' or '≈'
-    0 otherwise
+    0  otherwise (plain mention with no commitment signal)
 
-    Selection: take the highest-scoring tier; within that tier, take the FIRST
-    candidate (so the primary commitment beats later hedged alternatives like
-    'the answer would be roughly...'). If the chosen match falls inside a
-    numeric range '<low>-<high> <unit>', return the midpoint.
+    Selection: take the highest-scoring tier; within that tier, take the LAST
+    candidate. Rationale: when the model gives an intermediate "Total: X" early
+    and refines to a final "Estimated Total: Y" later, Y is the committed
+    answer. Hedged alternatives rarely tie at the top tier because they lack
+    the strong markers (bold-with-label or "Grand total:" prefix) of a primary
+    commitment.
 
     Cross-tier filter: any '<num> <unit>' immediately followed by 'per <word>'
-    is a rate and skipped — handles 'X hours per match' etc.
+    is a rate and is skipped — handles 'X hours per match' etc.
+
+    Range handling: if the winning match is the high end of a '<low>-<high>
+    <unit>' or '<low> to <high> <unit>' range, the midpoint is returned.
     """
-
-    import re
-
-
-    def extract_answer(text, unit="hour"):
-        """Extract the model's committed numeric answer from a free-form response."""
-        # Strip percentages so confidence numbers can't be matched as the answer.
-        text = re.sub(r"\d+(?:\.\d+)?\s*(?:[-–]\s*\d+(?:\.\d+)?)?\s*%", "", text)
+    # Strip percentage values first so confidence numbers (e.g. "70%") are
+    # never matched as the numeric answer.
+    text = re.sub(r"\d+(?:\.\d+)?\s*(?:[-–]\s*\d+(?:\.\d+)?)?\s*%", "", text)
 
     num_pat = r"(\d+(?:,\d+)*(?:\.\d+)?)"
     unit_pat = rf"{unit}s?"
@@ -283,23 +301,19 @@ def grade_entry(entry, truth_lookup, unit, refusal_patterns):
             f"Results file may have been generated from a different spec."
         )
 
-    # Pre-query: True if the model attempted an answer, False if it matched
-    # any refusal pattern. This is the coverage_check signal — used by the
-    # downstream analysis to filter out uncovered topics.
-    pre_query_answered = not is_refusal(entry["pre_answer"], refusal_patterns)
+    # Pre-query: True only if the pre-answer contains a recognisable game
+    # score (N-N or comma-separated form). Score presence is the sole signal —
+    # a hedging response with no score is unanswered even if it avoids all
+    # refusal keywords; a confident response must commit to a numeric score.
+    pre_query_answered = has_score(entry["pre_answer"])
 
     # Grade each individual run.
     graded_runs = []
     for run in entry["runs"]:
         graded = grade_run(run["answer"], known_answer, unit)
-        # run_refused is True whenever a refusal phrase is found, regardless
-        # of whether a number was extracted. By design — a refused-but-
-        # extracted run gets flagged by the all_runs_accounted_for check
-        # in the summary below.
         refusal_pattern = find_refusal_pattern(run["answer"], refusal_patterns)
-        # run_refused is True only when a refusal phrase was found AND
-        # extraction failed — a run that matches a hedging phrase but still
-        # produces a number counts as answered, not refused.
+        # run_refused requires both a matched refusal phrase AND extraction
+        # failure. A run that hedges but still produces a number is answered.
         run_refused = refusal_pattern is not None and graded["extracted"] is None
         # Confidence is null when no number was extracted — a stated
         # confidence without an answer isn't meaningful.
@@ -474,6 +488,7 @@ def grade_results(results_path, spec) -> Path:
         json.dump(output, f, indent=2)
 
     return graded_path
+
 
 # --- Plotting --------------------------
 
