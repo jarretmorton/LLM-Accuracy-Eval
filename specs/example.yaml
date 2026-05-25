@@ -1,0 +1,90 @@
+# Example eval spec for llm-accuracy-eval.
+#
+# This spec reproduces a slice of the accuracy investigation from the
+# LessWrong post the harness is built around. Run it with:
+#
+#   llm-accuracy-eval run specs/example.yaml
+#
+# The spec is intentionally small. The goal is to demonstrate the format,
+# and make adding additional new models simple (not to reproduce the full 640-query result).
+
+name: example-sports-leagues
+
+version: "1.0"
+
+description: >
+  Eight sports-league topics, two models, five runs each. Each topic includes a coverage_check (simple factual question with web search disabled) that indicates if the topic is in the training data, followed by a more complex question and a confidence assessment.
+
+# Models to run against. Strings are passed verbatim to the provider.
+models:
+  - claude-haiku-4-5
+#  - claude-sonnet-4-6
+#  - claude-opus-4-6
+#  - claude-opus-4-7
+
+# Number of times to run each primary query, per model, per topic.
+runs: 2
+
+# Sampling temperature. 1.0 matches claude.ai's apparent default (per
+# third-party measurement), the platform used in the original LessWrong study.
+# 0 trivialises stability and is rejected.
+temperature: 1.0
+
+# Grader:
+#   type: exact | numeric | judge | none.
+#     exact   — string equality with ground_truth (case-insensitive, whitespace-trimmed).
+#     numeric — regex extraction with unit awareness; accuracy = 1 - |x - truth| / truth.
+#     judge   — LLM-as-judge call; requires judge_model.
+#     none    — measure stability only; do not compute accuracy.
+#   expected unit: defines what units to look for, helps find the answer
+#   refusal patterns: Phrases that indicate the model couldn't answer — extend this list as new patterns are observed
+
+grader:
+  type: numeric
+  expected_unit: hours
+  refusal_patterns:
+  - "can't verify"
+  - "I don't have access"
+  - "I cannot find"
+  - "I cannot provide"
+  - "I could not find"
+  - "I'm not sure"
+  - "I don't know"
+  - "I don't have information about"
+  - "I do not have"
+  - "I was unable to find"
+  - "I'm unable to find"
+  - "I am unable to"
+  - "Without access to"
+  - "did not return any source"
+  - "could not be found"
+  - "I don't have reliable information"
+  - "training data"
+
+# defines leagues, year, and truth for that league in that year
+topics:
+  - {league: "National Football League",            year: 2023, truth: 285}
+  - {league: "Major League Baseball",               year: 2023, truth: 6589.33}
+#  - {league: "Major League Soccer",                 year: 2023, truth: 781.5}
+#  - {league: "National Hockey League",              year: 2023, truth: 1400}
+#  - {league: "Basketball Africa League",            year: 2023, truth: 25.33}
+#  - {league: "Korean Baseball Organization League", year: 2023, truth: 2348}
+  - {league: "Swedish Hockey League",               year: 2023, truth: 414}
+  - {league: "Finnish Women's Basketball League",   year: 2023, truth: 100.67}
+
+# queries are from less wrong post with a correction to add a question mark to end of pre_query
+queries:
+  pre_query:
+    text: >
+      Do not search the internet for this answer (use only your training). What was the final game winning score for the {league} in the season ending in {year}?
+    web_search: false
+
+  query:
+    text: >
+      What was the total playing time in hours for the {league} in the season ending in {year}? Include post season playoffs, but don't include any overtime. What is your confidence in this answer 0% to 100%?
+    web_search: true
+
+# Output destination. JSON, one file per eval session.
+output:
+  path: results/example.json
+  format: json
