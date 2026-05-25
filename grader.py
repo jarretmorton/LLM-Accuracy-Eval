@@ -297,13 +297,17 @@ def grade_entry(entry, truth_lookup, unit, refusal_patterns):
         # extracted run gets flagged by the all_runs_accounted_for check
         # in the summary below.
         refusal_pattern = find_refusal_pattern(run["answer"], refusal_patterns)
+        # run_refused is True only when a refusal phrase was found AND
+        # extraction failed — a run that matches a hedging phrase but still
+        # produces a number counts as answered, not refused.
+        run_refused = refusal_pattern is not None and graded["extracted"] is None
         # Confidence is null when no number was extracted — a stated
         # confidence without an answer isn't meaningful.
         confidence = extract_confidence(run["answer"]) if graded["extracted"] is not None else None
         graded_runs.append({
             "run": run["run"],
-            "run_refused": refusal_pattern is not None,
-            "refusal_pattern": refusal_pattern,
+            "run_refused": run_refused,
+            "refusal_pattern": refusal_pattern if run_refused else None,
             **{k: v for k, v in graded.items() if k != "accuracy"},
             "confidence": confidence,
             "accuracy": graded["accuracy"],
