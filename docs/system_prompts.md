@@ -1,6 +1,6 @@
 # System Prompts
 
-> **Status:** v0.2 — no LLM prompts used by the current grader (`grader.py` is regex-based). The judge prompt below is a draft for the `judge` grader mode planned in a future release. Considering using system prompts that mandate structure in the response to make it easier for the numerical grader (max tokens, final answer format and location for pre-query, query, and confidence responses)
+> **Status:** v1.0 — no LLM prompts used by the current grader (`grader.py` is regex-based). The judge prompt below is a draft for the `judge` grader mode planned in a future release. Considering using system prompts that mandate structure in the response to make it easier for the numerical grader (max tokens, final answer format and location for pre-query, query, and confidence responses)
 
 ---
 
