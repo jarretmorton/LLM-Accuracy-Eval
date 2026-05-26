@@ -8,7 +8,7 @@
 # The spec is intentionally small. The goal is to demonstrate the format,
 # and make adding additional new models simple (not to reproduce the full 640-query result).
 
-name: example-sports-leagues
+name: claude-sonnet-4-6 LessWrong validation
 
 version: "1.0"
 
