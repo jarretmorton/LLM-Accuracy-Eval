@@ -146,27 +146,134 @@ def is_truncated(answer_text, stop_reason=None):
     return stripped[-1] not in ".!?\")]'%"
 
 
+# --- Label regexes (module-level so they can be reused / tested) -----------
+#
+# STRONG labels indicate a final/aggregate commitment. When found inside a
+# bold span, they promote the bolded number to tier 5 — above sub-component
+# totals labelled only "Total:".
+#
+# Deliberately excluded: "season total" / "regular season total" — those
+# describe a sub-component (regular season vs postseason), not the grand
+# aggregate. Strong labels must be unambiguously top-of-hierarchy.
+STRONG_LABEL_RE = re.compile(
+    r"\b(?:grand[\s-]+total|final\s+answer|final\s+total"
+    r"|overall\s+total|combined\s+total|grand\s+answer)\b",
+    re.IGNORECASE,
+)
+# WEAK labels cover sub-component sums and answer declarations: "Total:",
+# "Answer:", "Final:". On their own they're tier-4 / tier-3 commitments.
+# Note: STRONG matches are a superset of WEAK in places ("grand total"
+# contains the word "total"), so when classifying a span we check STRONG
+# first and fall through to WEAK.
+WEAK_LABEL_RE = re.compile(
+    r"\b(?:total|answer|final|grand)\b",
+    re.IGNORECASE,
+)
+# A bold span whose content is JUST a label word (with optional trailing
+# punctuation). Used for table-row label propagation: a cell like `**Total**`
+# in a row `| **Total** | **~429 hours** |` should label every number on the
+# same line.
+LABEL_ONLY_BOLD_RE = re.compile(
+    r"\*\*\s*"
+    r"((?:grand[\s-]+total|final\s+answer|final\s+total"
+    r"|overall\s+total|combined\s+total|grand\s+answer"
+    r"|total|answer|final|grand))"
+    r"\s*[:.]?\s*\*\*",
+    re.IGNORECASE,
+)
+# Strong-label set for the table-row propagation check (lowercase, single
+# whitespace between words for normalised comparison).
+_STRONG_LABEL_FORMS = {
+    "grand total", "grand-total",
+    "final answer", "final total",
+    "overall total", "combined total",
+    "grand answer",
+}
+
+
+def _is_labeling_position(text, label_start, label_end):
+    """
+    True iff the label match at [label_start:label_end] is being used
+    syntactically as a label — i.e. it actually *introduces* a value — rather
+    than appearing as prose.
+
+    Accepts:
+      - Followed immediately by labeling punctuation: ':', '=', '≈', or
+        a bold-close '**'.
+      - Followed by 'is' / 'was' / 'of' / 'equals' / 'comes out to' then a
+        number, optionally with a hedge word ('approximately', 'about', '~').
+      - Preceded by a table-cell pipe '|' or line-start, possibly with
+        markdown list / header / blockquote markers and a bold-open '**'.
+
+    Rejects (in addition to the default "no accept rule matched"):
+      - Followed by hedging or noun-phrase continuations: 'would',
+        'number of', 'year(s)', 'game(s)', 'season(s)', 'playing',
+        'win(s)', 'loss(es)' — catches "the total number of games",
+        "the answer would be", "the total playing time", etc.
+    """
+    after = text[label_end : label_end + 25]
+    before = text[max(0, label_start - 15) : label_start]
+
+    # Reject obvious prose continuations.
+    if re.match(
+        r"\s+(?:would|number\s+of|year|years|game|games"
+        r"|season|seasons|playing|win|wins|loss|losses)\b",
+        after, re.IGNORECASE,
+    ):
+        return False
+
+    # Accept: labeling punctuation immediately after.
+    if re.match(r"\s*[:=≈]", after):
+        return True
+    if re.match(r"\s*\*\*", after):
+        return True
+
+    # Accept: copulative / equivalence verb plus a number.
+    if re.match(
+        r"\s+(?:is|was|of|equals?|amounts?\s+to|comes?\s+out\s+to)\s+"
+        r"(?:approximately\s+|about\s+|roughly\s+|around\s+|~\s*)?\d",
+        after, re.IGNORECASE,
+    ):
+        return True
+
+    # Accept: table-cell start (preceded by '|') or markdown line-start,
+    # optionally followed by list / blockquote / header markers and a
+    # bold-open '**'.
+    if re.search(r"(?:^|\n|\|)\s*[>#*\-]*\s*\*?\*?\s*$", before):
+        return True
+
+    return False
+
+
 def extract_answer(text, unit=None):
     """
     Extract the model's committed numeric answer using a scoring system over
     all `<num> <unit>` matches in the text, where score reflects the strength
     of "this is the model's committed answer" markers.
 
-    Scoring:
-    +4 if inside markdown bold AND the bold span contains a label keyword
-        ('total' / 'grand total' / 'answer' / 'final answer')
-    +3 if on the same line as a label keyword AND inside bold
-    +2 if on the same line as a label keyword (no bold required)
-    +2 if inside markdown bold (but no label nearby)
-    +1 if immediately preceded by '=' or '≈'
-    0  otherwise (plain mention with no commitment signal)
+    Scoring (highest tier wins; ties broken by document order — LAST wins):
+    +5 inside markdown bold AND the bold span contains a STRONG label
+        (e.g. 'grand total', 'final answer', 'season total')
+    +4 inside markdown bold AND the bold span contains a WEAK label
+        (e.g. 'total', 'answer'). Also +4 via table-row label propagation:
+        if any standalone '**Total**'-style bold sits on the same line as a
+        bolded number, the number is treated as if its bold contained that
+        label — handles `| **Total** | **~429 hours** |` table rows.
+    +3 same-line strict label keyword AND inside bold
+    +2 same-line strict label keyword (no bold required)
+    +2 inside markdown bold (but no label nearby)
+    +1 immediately preceded by '=' or '≈'
+     0 plain mention with no commitment signal
 
-    Selection: take the highest-scoring tier; within that tier, take the LAST
-    candidate. Rationale: when the model gives an intermediate "Total: X" early
-    and refines to a final "Estimated Total: Y" later, Y is the committed
-    answer. Hedged alternatives rarely tie at the top tier because they lack
-    the strong markers (bold-with-label or "Grand total:" prefix) of a primary
-    commitment.
+    "Strict label" means the keyword is in a labeling syntactic position
+    (followed by ':' / '=' / '**', or by 'is'/'was'/'of' + number, or at
+    a table-cell / line-start position). Prose uses like "the answer would
+    be", "54 hours total.", or "the total number of games" are NOT labels.
+
+    "Would"-demotion: any candidate is demoted by one tier if the word
+    'would' appears within 25 chars of the candidate's commitment marker
+    (bold-span start or the number itself). Catches "the answer would be
+    (~76 hours)" and "would be only about 54 hours total."
 
     Cross-tier filter: any '<num> <unit>' immediately followed by 'per <word>'
     is a rate and is skipped — handles 'X hours per match' etc.
@@ -211,20 +318,36 @@ def extract_answer(text, unit=None):
                 return (bs, be)
         return None
 
-    # Label-keyword positions.
-    label_re = re.compile(r"\b(?:grand\s+total|final\s+answer|total|answer)\b", re.IGNORECASE)
-    label_positions = [m.start() for m in label_re.finditer(text)]
+    # Label-keyword positions, filtered to those in true labeling syntactic
+    # positions (rejecting prose uses like "the answer would be" or
+    # "54 hours total.").
+    label_positions = [
+        m.start() for m in WEAK_LABEL_RE.finditer(text)
+        if _is_labeling_position(text, m.start(), m.end())
+    ]
 
-    def label_on_line(pos):
-        """True if any label keyword occurs on the same line as `pos`."""
+    def strict_label_on_line(pos):
+        """True if any strict-labeling label keyword is on the same line."""
         ls, le = line_bounds(pos)
         return any(ls <= lp < le for lp in label_positions)
 
+    # Table-row label propagation: build a map from line_start to the
+    # strongest label class found in a standalone bold span on that line.
+    # `**Total**` on a line propagates "weak" to every number on that line;
+    # `**Grand Total**` propagates "strong".
+    table_label_promotion = {}  # line_start -> 'strong' | 'weak'
+    for m in LABEL_ONLY_BOLD_RE.finditer(text):
+        inner = re.sub(r"\s+", " ", m.group(1).strip().lower())
+        is_strong = inner in _STRONG_LABEL_FORMS
+        ls, _le = line_bounds(m.start())
+        cur = table_label_promotion.get(ls)
+        if cur == "strong":
+            continue  # don't downgrade
+        table_label_promotion[ls] = "strong" if is_strong else "weak"
+
     # --- Build candidate list --------------------------
 
-    # Each candidate: (score, position, value, range_midpoint_if_any)
-    # range_midpoint_if_any: if the candidate is part of "<low>-<high> <unit>",
-    # use the midpoint instead of the matched value.
+    # Each candidate: (score, position, value, bold_info)
     candidates = []
 
     # Pre-scan ranges so we can prefer midpoints when a range is detected.
@@ -252,15 +375,36 @@ def extract_answer(text, unit=None):
 
         pos = m.start()
         bold_info = in_bold(pos)
-        in_label_line = label_on_line(pos)
         # Equals-sign signal: look back ~5 chars for '=' or '≈'.
         prefix = text[max(0, pos - 5) : pos]
         has_eq = bool(re.search(r"[=≈]\s*~?\s*$", prefix))
 
+        # Compute "label inside the candidate's bold span" with two refinements:
+        #  (a) STRONG vs WEAK label distinction (drives tier 5 vs tier 4).
+        #  (b) Table-row promotion: if a standalone `**Total**` bold sits
+        #      on the same line as the candidate's bold, treat the
+        #      candidate as if its bold contained that label.
+        inside_strong = False
+        inside_weak = False
+        if bold_info:
+            bold_text = text[bold_info[0] : bold_info[1]]
+            if STRONG_LABEL_RE.search(bold_text):
+                inside_strong = True
+            elif WEAK_LABEL_RE.search(bold_text):
+                inside_weak = True
+            ls, _le = line_bounds(pos)
+            promotion = table_label_promotion.get(ls)
+            if promotion == "strong":
+                inside_strong = True
+            elif promotion == "weak" and not inside_strong:
+                inside_weak = True
+
+        in_label_line = strict_label_on_line(pos)
+
         # Score.
-        if bold_info and label_re.search(text[bold_info[0] : bold_info[1]]):
-            # Bold span itself contains a label keyword. Strongest signal —
-            # this is the model's bolded answer-declaration.
+        if inside_strong:
+            score = 5
+        elif inside_weak:
             score = 4
         elif in_label_line and bold_info:
             score = 3
@@ -272,6 +416,18 @@ def extract_answer(text, unit=None):
             score = 1
         else:
             score = 0
+
+        # "Would"-demotion: if 'would' appears within 25 chars before the
+        # candidate's commitment marker (bold-span start or the number
+        # itself, whichever is earlier), demote one tier. Catches
+        # "the answer would be (~76 hours)" and "would be only about
+        # 54 hours total" — the model is hedging an alternative, not
+        # committing.
+        check_pos = bold_info[0] if bold_info else pos
+        line_start = line_bounds(pos)[0]
+        window_start = max(line_start, check_pos - 25)
+        if re.search(r"\bwould\b", text[window_start:check_pos], re.IGNORECASE):
+            score = max(0, score - 1)
 
         candidates.append((score, pos, value, bold_info))
 
