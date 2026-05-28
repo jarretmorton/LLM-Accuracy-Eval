@@ -1,12 +1,148 @@
 # System Prompts
 
-> **Status:** v1.0 — no LLM prompts used by the current grader (`grader.py` is regex-based). The judge prompt below is a draft for the `judge` grader mode planned in a future release. Considering using system prompts that mandate structure in the response to make it easier for the numerical grader (max tokens, final answer format and location for pre-query, query, and confidence responses)
+> **Status:** v1.0 ships two grader paths.
+>
+> - **Default (`grader.type: numeric`)** — regex-based grader, no system prompt sent to the model under test. Matches the LessWrong baseline.
+> - **Structured (`grader.type: structured`)** — system prompts force a fixed terminal-block format, parsed directly by `grader_structured.py`. Selected per-spec.
 
 ---
 
 ## Model under test
 
-The harness sends `system=None` to the model under test. The LessWrong methodology this harness implements was originally run via claude.ai, which does not expose a system prompt to users. Sending a system prompt from the harness would push the API call away from that baseline. The judge prompt below is sent to a separate `judge_model`, not the model under test.
+### Numeric / exact / judge paths
+
+The harness sends `system=None` to the model under test. The LessWrong methodology this harness implements was originally run via claude.ai, which does not expose a system prompt to users. Sending a system prompt from the harness would push the API call away from that baseline.
+
+### Structured path
+
+When a spec sets `grader.type: structured`, system prompts are defined per query under `queries.pre_query.system_prompt` and `queries.query.system_prompt` in the YAML spec. They are substituted with `{league}`, `{year}`, `{soft_token_budget}`, and `{expected_unit}` at runtime and sent via the existing `system=` parameter of `chat()`.
+
+The structured path is a deliberate departure from the LessWrong baseline. Use it when the goal is to study the harness mechanics under clean grading rather than to reproduce the original empirical result.
+
+#### Pre-query system prompt template
+
+```
+You are answering a factual sports question for a research evaluation.
+Use only your training data — do not search the internet, even if
+tools are available.
+
+Respond with brief reasoning, then end your response with a terminal
+block in EXACTLY this format and nothing after it:
+
+=== ANSWER ===
+HOME_TEAM: <home team name, or UNKNOWN>
+AWAY_TEAM: <away team name, or UNKNOWN>
+SCORE: <home_score-away_score as a single integer pair, e.g. "25-22", or UNKNOWN>
+STATUS: <ANSWERED or REFUSED>
+
+Rules:
+- Aim to commit all three fields when possible. Partial commits are
+  accepted: use STATUS: ANSWERED if you commit to at least one
+  non-UNKNOWN field.
+- Use STATUS: REFUSED only if HOME_TEAM, AWAY_TEAM, and SCORE are all UNKNOWN.
+- SCORE must be a SINGLE integer pair. Do not give ranges, alternatives,
+  or hedged forms like "25-22 or 30-25". If you are between options,
+  pick one.
+- Do not output any text after the STATUS line.
+- Your entire response (reasoning + terminal block) must fit comfortably
+  within {soft_token_budget} tokens. If you find yourself running long,
+  shorten the reasoning and emit the terminal block immediately.
+```
+
+#### Primary query system prompt template
+
+```
+You are answering a factual sports question for a research evaluation.
+Use your training data and any tools available to you.
+
+Respond with brief reasoning, then end your response with a terminal
+block in EXACTLY this format and nothing after it:
+
+=== ANSWER ===
+VALUE: <single number in {expected_unit}, or UNKNOWN>
+CONFIDENCE_PCT: <integer 0-100, or UNKNOWN>
+STATUS: <ANSWERED or REFUSED>
+
+Rules:
+- VALUE must be a SINGLE number (e.g. "285" or "285.5"). Do NOT give a
+  range, an expression, or a hedged form like "~285" or "about 285".
+  If your best estimate is a range, commit to the midpoint.
+- CONFIDENCE_PCT must be a SINGLE integer 0-100 (no percent sign), or
+  UNKNOWN. Do NOT give a range — if your honest assessment is a range,
+  commit to the midpoint rounded to the nearest integer. CONFIDENCE_PCT
+  is OPTIONAL: if you have a numeric VALUE but cannot meaningfully
+  assess confidence, set CONFIDENCE_PCT: UNKNOWN.
+- Use STATUS: ANSWERED if you commit to a numeric VALUE. CONFIDENCE_PCT
+  may be UNKNOWN when STATUS is ANSWERED.
+- Use STATUS: REFUSED only if you cannot commit to a numeric VALUE.
+- Do not output any text after the STATUS line.
+- Your entire response (reasoning + terminal block) must fit comfortably
+  within {soft_token_budget} tokens. If you find yourself running long,
+  shorten the reasoning and emit the terminal block immediately.
+```
+
+#### Token budget design
+
+`query.py`'s `MAX_TOKENS` constant (default 3000) is the **hard cap** sent to the API. The system prompt tells the model a **soft budget** (default 2500, configurable via `spec.soft_token_budget`), which is ~20% lower. The headroom lets the model emit the terminal block even after a long chain of reasoning.
+
+A truncated response is detected by `stop_reason == "max_tokens"`. The model never emits `STATUS: TRUNCATED` — if it could, it wasn't truncated.
+
+#### Per-run status semantics (primary query)
+
+The grader produces one of four statuses per primary-query run:
+
+| Status     | Source                                              |
+|------------|-----------------------------------------------------|
+| ANSWERED   | Terminal block present; STATUS line says ANSWERED; VALUE parses. CONFIDENCE_PCT may be UNKNOWN — the run still contributes to accuracy and stability summaries, and only `mean_confidence` is affected. |
+| REFUSED    | Terminal block present; STATUS line says REFUSED.   |
+| TRUNCATED  | API `stop_reason == "max_tokens"`. Terminal block may or may not be present; ignored either way. |
+| MALFORMED  | Terminal block missing (and not truncated), or block present but VALUE is unparseable. |
+
+#### Per-topic status semantics (pre-query)
+
+The grader produces one of four statuses per pre-query (one per topic):
+
+| Status     | Source                                                                                          |
+|------------|-------------------------------------------------------------------------------------------------|
+| COMMITTED  | Terminal block present; at least one of HOME_TEAM, AWAY_TEAM, SCORE is non-UNKNOWN.            |
+| REFUSED    | Terminal block present; all three fields UNKNOWN.                                              |
+| TRUNCATED  | API `stop_reason == "max_tokens"`.                                                              |
+| MALFORMED  | Terminal block missing or none of the expected keys parsed.                                    |
+
+The status is intentionally coarse — filter granularity lives in three derived booleans below. The status is driven by what was actually committed, not by the model's STATUS line. A model claiming ANSWERED with everything UNKNOWN is classified as REFUSED.
+
+#### Pre-query filter booleans
+
+Three nested filters, in increasing strictness:
+
+> Fully Answered ⊂ Answered ⊂ Partially Answered
+
+| Boolean                          | Definition                                                                                                                            | Used by                |
+|----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|------------------------|
+| `pre_query_partially_answered`   | `teams_identified` **or** `score_provided` **or** `has_score(text)` matches in the response (suppressed under truncation).            | Plot 3                 |
+| `pre_query_answered`             | `score_provided`: SCORE field parsed to int-int. Semantically aligned with the numeric grader's same field, but stricter (field commitment, not free-text regex). | Cross-grader analysis  |
+| `pre_query_fully_answered`       | `teams_identified` **and** `score_provided`: both teams non-UNKNOWN and SCORE parsed.                                                 | Plot 4                 |
+
+**Note on `pre_query_partially_answered`.** This is the loosest filter and uses the same `has_score` text-regex as the numeric grader, imported directly from `grader.py`. It catches hedged commitments like *"I think it was around 25-22"* in reasoning text even when the model set `SCORE: UNKNOWN`. The text scan is suppressed when `stop_reason == "max_tokens"`, mirroring the numeric grader's `(not pre_truncated) and has_score(...)` rule — a digit pair appearing mid-thought in a truncated response isn't a real commitment.
+
+**Note on `pre_query_answered`.** Field name kept in common with the numeric grader for cross-grader analysis. The semantics differ deliberately: numeric measures *intent loosely* (a score-shaped string anywhere in prose); structured measures *commitment strictly* (the model put it in the SCORE field). Combined plots (`main.py plot`) that mix graded outputs from both graders will therefore apply different filters under the same name. This is documented behavior, not a bug — the structured signal is intentionally more rigorous.
+
+#### Plot outputs
+
+`grader_structured.generate_plots()` emits **four** plots (vs. the numeric grader's three):
+
+| File suffix                                       | x-axis     | y-axis    | filter                              |
+|---------------------------------------------------|------------|-----------|-------------------------------------|
+| `_accuracy_vs_confidence.png`                     | confidence | accuracy  | none                                |
+| `_accuracy_vs_stability.png`                      | stability  | accuracy  | none                                |
+| `_accuracy_vs_stability_partially_answered.png`   | stability  | accuracy  | `pre_query_partially_answered`      |
+| `_accuracy_vs_stability_fully_answered.png`       | stability  | accuracy  | `pre_query_fully_answered`          |
+
+Plot 4's data is a strict subset of plot 3's. Plot 4 is semantically equivalent to `grader.py`'s existing `_filtered` plot in practice (a committed score implies the teams were identifiable). Plot 3 is the looser filter — useful for testing whether weak commitment (hedged score in prose, or teams without score) correlates with stability/accuracy independently of strong commitment.
+
+The shared scatter helper (`_plot_scatter_with_trends`) is imported from `grader.py` so plot styling stays identical across the two grader paths.
+
+---
 
 ## Grader (LLM-as-judge)
 
@@ -39,7 +175,6 @@ Do not output anything outside the JSON object.
 ## Open design questions
 
 - **Agreement vs. correctness in the judge prompt.** The judge prompt above grades correctness against ground truth, not agreement between responses. The current methodology supports this directly — each run is graded against truth independently, and stability is derived from the per-run accuracies. The agreement-grading variant is not needed.
-    - Current thought is I would use a judge to check numeric grading, and implement a system prompt for better reply structure to make numeric grading easier.
-- **Coverage-check refusal vs. in-the-wild refusal.** Open for when the coverage check lands in v0.2. Worth deciding whether the harness should distinguish a refusal from the coverage check (training-data signal) from a refusal during the primary query (semantic stability signal).
-    - Yes both need to be tracked. A refusal in the coverage check via the pre-query is used for the stability filter. Refusal in the primary query must be sorted from truncation, and then excluded from calculations.
+- **Coverage-check refusal vs. in-the-wild refusal.** Tracked separately. The pre-query filter booleans (`pre_query_partially_answered`, `pre_query_answered`, `pre_query_fully_answered`) drive the stability/accuracy filtered plots. Per-run refusals during the primary query are sorted from truncation (by `stop_reason`) and from malformed output (by terminal-block presence), then excluded from the accuracy and stability calculations.
 - **Judge model independence.** When `grader: judge`, `judge_model` must not appear in `models`. Grading by a model in the same family as the model under test introduces a known bias. The spec validator will reject configurations that violate this rule; the README will document it.
+- **Structured vs. baseline divergence.** The structured path is not a drop-in replacement for the LessWrong reproduction — it is a different methodology. A future eval could run both paths against the same models and compare accuracy/stability characteristics directly, but the two should not be mixed within a single results set. `pre_query_answered` shares a name across graders for cross-grader comparison, but the semantics differ (numeric: free-text regex; structured: SCORE field commitment) — combined plots applied across mixed grader outputs will use whichever filter the field happens to evaluate to per file, which is the documented behavior.

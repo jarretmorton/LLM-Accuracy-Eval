@@ -61,8 +61,24 @@ from types import SimpleNamespace   # lightweight object used as a stand-in spec
 # only main.py knows how to chain them.
 from spec import load_spec                        # load_spec(path) -> Spec
 from query import run_harness                     # run_harness(spec, spec_path) -> Path
-from grader import grade_results, generate_plots  # grade_results(path, spec) -> Path
+from grader import grade_results as grade_numeric, generate_plots
+from grader_structured import (
+    grade_results as grade_structured,
+    generate_plots as plots_structured,
+)
                                                   # generate_plots(path, spec) -> list[Path]
+
+
+def _grade_results(results_path, spec):
+    if spec.grader.type == "structured":
+        return grade_structured(results_path, spec)
+    return grade_numeric(results_path, spec)
+
+
+def _generate_plots(graded_path, spec):
+    if spec.grader.type == "structured":
+        return plots_structured(graded_path, spec)
+    return generate_plots(graded_path, spec)
 
 
 # --- Subcommand handlers --------------------------
@@ -96,12 +112,12 @@ def cmd_run(args: argparse.Namespace) -> None:
     # Step 3: Grade. No API calls — pure local computation over the JSON
     # written in Step 2. Appends _graded to the filename.
     print("Grading results...")
-    graded_path = grade_results(results_path, spec)
+    graded_path = _grade_results(results_path, spec)
     print(f"Graded results written → {graded_path}")
 
     # Step 4: Generate the three accuracy plots alongside the graded file.
     print("Generating plots...")
-    plot_paths = generate_plots(graded_path, spec)
+    plot_paths = _generate_plots(graded_path, spec)
     for p in plot_paths:
         print(f"  Wrote {p}")
 
@@ -191,11 +207,11 @@ def cmd_grade(args: argparse.Namespace) -> None:
         sys.exit(f"Error: results file not found: {results_path}")
 
     print(f"Grading {results_path} against spec {spec.name}...")
-    graded_path = grade_results(results_path, spec)
+    graded_path = _grade_results(results_path, spec)
     print(f"Graded results written → {graded_path}")
 
     print("Generating plots...")
-    plot_paths = generate_plots(graded_path, spec)
+    plot_paths = _generate_plots(graded_path, spec)
     for p in plot_paths:
         print(f"  Wrote {p}")
 

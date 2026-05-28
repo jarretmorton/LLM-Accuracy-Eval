@@ -28,7 +28,7 @@ import yaml
 
 # Grader types the parser will accept. Anything else fails validation.
 # Keeping the set here makes it the single source of truth for what's valid.
-ALLOWED_GRADER_TYPES = {"exact", "numeric", "judge", "none"}
+ALLOWED_GRADER_TYPES = {"exact", "numeric", "judge", "none", "structured"}
 
 # Top-level YAML keys that must be present. The parser rejects specs
 # missing any of these before trying to construct the typed object.
@@ -56,6 +56,7 @@ class QueryConfig:
     """One query definition — either the pre_query or the primary query."""
     text: str
     web_search: bool
+    system_prompt: str = ""
 
     def __post_init__(self):
         # Defensive: catch obvious bad inputs early. {league}/{year}
@@ -126,6 +127,7 @@ class Spec:
     queries: QueriesConfig
     output: OutputConfig
     description: str = ""
+    soft_token_budget: int = None
 
     def __post_init__(self):
         # temperature > 0: temperature=0 trivialises stability (same response
@@ -240,4 +242,5 @@ def load_spec(path) -> Spec:
         topics=raw["topics"],
         queries=queries,
         output=output,
+        soft_token_budget=raw.get("soft_token_budget"),
     )

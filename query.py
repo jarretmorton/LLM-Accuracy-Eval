@@ -156,6 +156,18 @@ def run_harness(spec, spec_path) -> Path:
     # to stream to disk per-topic so a crash doesn't lose everything.
     results = []
 
+    # Resolve the soft token budget and system prompts once, before the
+    # per-(model, topic) loop. None values for system_prompt indicate "use
+    # the claude.ai baseline behavior" (system=None to chat()).
+    soft_budget = (
+        spec.soft_token_budget
+        if getattr(spec, "soft_token_budget", None)
+        else int(MAX_TOKENS / 1.2)
+    )
+    expected_unit = getattr(spec.grader, "expected_unit", "") or ""
+    pre_system_template = spec.queries.pre_query.system_prompt or None
+    query_system_template = spec.queries.query.system_prompt or None
+
     # Outer loop: models. Each model runs against every topic before moving
     # to the next model. Serial — no parallelism for v1.0.
     for model_idx, model_name in enumerate(spec.models):
@@ -170,11 +182,23 @@ def run_harness(spec, spec_path) -> Path:
             # .format() substitutes {league} and {year} placeholders from
             # the spec's pre_query template into the actual prompt text.
             pre_query_text = spec.queries.pre_query.text.format(league=league, year=year)
+
+            # Resolve system prompts for this topic. Same placeholder set
+            # as the query text, plus {soft_token_budget} and {expected_unit}.
+            fmt_kwargs = dict(
+                league=league, year=year,
+                soft_token_budget=soft_budget,
+                expected_unit=expected_unit,
+            )
+            pre_system = pre_system_template.format(**fmt_kwargs) if pre_system_template else None
+            query_system = query_system_template.format(**fmt_kwargs) if query_system_template else None
+
             pre_messages = []
             add_user_message(pre_messages, pre_query_text)
             pre_answer, pre_stop_reason = chat(
                 pre_messages,
                 model=model_name,
+                system=pre_system,
                 temperature=spec.temperature,
                 web_search=spec.queries.pre_query.web_search,
             )
@@ -192,6 +216,7 @@ def run_harness(spec, spec_path) -> Path:
                 answer, stop_reason = chat(
                     messages,
                     model=model_name,
+                    system=query_system,
                     temperature=spec.temperature,
                     web_search=spec.queries.query.web_search,
                 )

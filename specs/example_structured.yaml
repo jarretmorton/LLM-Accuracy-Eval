@@ -1,0 +1,137 @@
+# Example structured-grader spec for llm-accuracy-eval.
+#
+# This spec demonstrates the alternate `grader.type: structured` path.
+# It uses system prompts that force the model under test to commit to a
+# fixed output shape, which the grader parses directly — no regex-extraction
+# scoring tables, no range midpoint inference, no refusal pattern matching.
+#
+# Run with:
+#   python main.py run specs/example_structured.yaml
+
+name: example-sports-leagues-structured
+
+version: "1.0"
+
+description: >
+  Same sports-league topics as example.yaml, but with system prompts that
+  enforce a strict terminal-block output format. The structured grader
+  parses the block directly and emits four plots
+  (Accuracy vs Confidence, vs Stability, vs Stability filtered to any
+  pre-query commit, vs Stability filtered to fully-answered pre-queries).
+
+models:
+#  - claude-haiku-4-5
+  - claude-sonnet-4-6
+#  - claude-opus-4-6
+#  - claude-opus-4-7
+
+runs: 2
+
+temperature: 1.0
+
+# Soft budget that the system prompts tell the model to stay within.
+# query.py's MAX_TOKENS is the hard cap and should be set ~20% above this
+# (e.g. soft 2500 → hard 3000). Read by query.py and substituted into
+# both system prompts via the {soft_token_budget} placeholder.
+soft_token_budget: 2500
+
+# Grader:
+#   type: exact | numeric | judge | none | structured
+#     structured — parses '=== ANSWER ===' terminal block emitted by the
+#                  model under test. Must be paired with system prompts
+#                  that define the format (see queries.*.system_prompt below).
+#   expected_unit — substituted into the query system prompt as {expected_unit}.
+#   refusal_patterns — ignored by the structured grader (STATUS line replaces
+#                  them); kept here only to satisfy spec.py's existing schema.
+grader:
+  type: structured
+  expected_unit: hours
+  refusal_patterns:
+    - "ignored-by-structured-grader"
+
+# Topics: same shape as example.yaml.
+topics:
+  - {league: "National Football League",            year: 2023, truth: 285}
+#  - {league: "Major League Baseball",               year: 2023, truth: 6589.33}
+#  - {league: "Major League Soccer",                 year: 2023, truth: 781.5}
+#  - {league: "National Hockey League",              year: 2023, truth: 1400}
+#  - {league: "Basketball Africa League",            year: 2023, truth: 25.33}
+#  - {league: "Korean Baseball Organization League", year: 2023, truth: 2348}
+  - {league: "Swedish Hockey League",               year: 2023, truth: 414}
+  - {league: "Finnish Women's Basketball League",   year: 2023, truth: 100.67}
+
+# Queries: identical text to example.yaml, plus a system_prompt per query.
+# Placeholders {soft_token_budget}, {expected_unit}, {league}, {year} are
+# substituted by query.py at runtime — same .format() pass as the query text.
+queries:
+  pre_query:
+    text: >
+      Do not search the internet for this answer (use only your training).
+      What was the final game winning score for the {league} in the season
+      ending in {year}?
+    web_search: false
+    system_prompt: |
+      You are answering a factual sports question for a research evaluation.
+      Use only your training data — do not search the internet, even if
+      tools are available.
+
+      Respond with brief reasoning, then end your response with a terminal
+      block in EXACTLY this format and nothing after it:
+
+      === ANSWER ===
+      HOME_TEAM: <home team name, or UNKNOWN>
+      AWAY_TEAM: <away team name, or UNKNOWN>
+      SCORE: <home_score-away_score as a single integer pair, e.g. "25-22", or UNKNOWN>
+      STATUS: <ANSWERED or REFUSED>
+
+      Rules:
+      - Aim to commit all three fields when possible. Partial commits are
+        accepted: use STATUS: ANSWERED if you commit to at least one
+        non-UNKNOWN field.
+      - Use STATUS: REFUSED only if HOME_TEAM, AWAY_TEAM, and SCORE are all UNKNOWN.
+      - SCORE must be a SINGLE integer pair. Do not give ranges, alternatives,
+        or hedged forms like "25-22 or 30-25". If you are between options,
+        pick one.
+      - Do not output any text after the STATUS line.
+      - Your entire response (reasoning + terminal block) must fit comfortably
+        within {soft_token_budget} tokens. If you find yourself running long,
+        shorten the reasoning and emit the terminal block immediately.
+
+  query:
+    text: >
+      What was the total playing time in hours for the {league} in the
+      season ending in {year}? Include post season playoffs, but don't
+      include any overtime. What is your confidence in this answer 0% to 100%?
+    web_search: true
+    system_prompt: |
+      You are answering a factual sports question for a research evaluation.
+      Use your training data and any tools available to you.
+
+      Respond with brief reasoning, then end your response with a terminal
+      block in EXACTLY this format and nothing after it:
+
+      === ANSWER ===
+      VALUE: <single number in {expected_unit}, or UNKNOWN>
+      CONFIDENCE_PCT: <integer 0-100, or UNKNOWN>
+      STATUS: <ANSWERED or REFUSED>
+
+      Rules:
+      - VALUE must be a SINGLE number (e.g. "285" or "285.5"). Do NOT give a
+        range, an expression, or a hedged form like "~285" or "about 285".
+        If your best estimate is a range, commit to the midpoint.
+      - CONFIDENCE_PCT must be a SINGLE integer 0-100 (no percent sign), or
+        UNKNOWN. Do NOT give a range — if your honest assessment is a range,
+        commit to the midpoint rounded to the nearest integer. CONFIDENCE_PCT
+        is OPTIONAL: if you have a numeric VALUE but cannot meaningfully
+        assess confidence, set CONFIDENCE_PCT: UNKNOWN.
+      - Use STATUS: ANSWERED if you commit to a numeric VALUE. CONFIDENCE_PCT
+        may be UNKNOWN when STATUS is ANSWERED.
+      - Use STATUS: REFUSED only if you cannot commit to a numeric VALUE.
+      - Do not output any text after the STATUS line.
+      - Your entire response (reasoning + terminal block) must fit comfortably
+        within {soft_token_budget} tokens. If you find yourself running long,
+        shorten the reasoning and emit the terminal block immediately.
+
+output:
+  path: results/example_structured.json
+  format: json
