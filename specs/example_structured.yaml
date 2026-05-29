@@ -85,19 +85,30 @@ queries:
       STATUS: <ANSWERED or REFUSED>
 
       Rules:
-      - Aim to commit all three fields when possible. Partial commits are
-        accepted: use STATUS: ANSWERED if you commit to at least one
-        non-UNKNOWN field.
-      - Use STATUS: REFUSED only if HOME_TEAM, AWAY_TEAM, and SCORE are all UNKNOWN.
+      - Commit each field INDEPENDENTLY. Set a field to UNKNOWN only when you
+        genuinely cannot recall THAT specific field — never because a different
+        field is uncertain. If you recall which teams played but not the final
+        score, fill in HOME_TEAM and AWAY_TEAM and set SCORE: UNKNOWN.
+      - If you can name the most likely team(s) even without full certainty,
+        put them in HOME_TEAM / AWAY_TEAM rather than UNKNOWN. Reserve UNKNOWN
+        for the case where you cannot name a plausible team at all. Do the same
+        for the score: commit your single best recollection rather than refusing
+        the field outright.
       - SCORE must be a SINGLE integer pair. Do not give ranges, alternatives,
         or hedged forms like "25-22 or 30-25". If you are between options,
         pick one.
+      - Use STATUS: ANSWERED if at least one field is non-UNKNOWN.
+        Use STATUS: REFUSED only if HOME_TEAM, AWAY_TEAM, and SCORE are all UNKNOWN.
       - Do not output any text after the STATUS line.
       - Your entire response (reasoning + terminal block) must fit comfortably
         within {soft_token_budget} tokens. If you find yourself running long,
         shorten the reasoning and emit the terminal block immediately.
 
   query:
+    # Set enabled: false to skip the primary query entirely (cheap
+    # pre-query-only re-run). Output is routed to <stem>_prequery.json so it
+    # won't clobber a full run; recombine later with `python main.py splice`.
+    enabled: true
     text: >
       What was the total playing time in hours for the {league} in the
       season ending in {year}? Include post season playoffs, but don't

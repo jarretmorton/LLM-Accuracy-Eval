@@ -57,6 +57,11 @@ class QueryConfig:
     text: str
     web_search: bool
     system_prompt: str = ""
+    # When False, run_harness skips this query entirely. Only acted on for
+    # the primary query (queries.query.enabled: false) — used for cheap
+    # pre-query-only re-runs that are later spliced back into a full results
+    # file. Defaults True so existing specs are unaffected.
+    enabled: bool = True
 
     def __post_init__(self):
         # Defensive: catch obvious bad inputs early. {league}/{year}
@@ -65,6 +70,8 @@ class QueryConfig:
             raise ValueError("query text must be a non-empty string")
         if not isinstance(self.web_search, bool):
             raise ValueError(f"web_search must be true or false; got {self.web_search!r}")
+        if not isinstance(self.enabled, bool):
+            raise ValueError(f"enabled must be true or false; got {self.enabled!r}")
 
 
 @dataclass

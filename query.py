@@ -148,8 +148,12 @@ def run_harness(spec, spec_path) -> Path:
     # The directory still comes from spec.output.path so the YAML controls
     # where files land without hard-coding the name.
     output_dir = Path(spec.output.path).parent
-    output_path = output_dir / (Path(spec_path).stem + ".json")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # When the primary query is disabled (queries.query.enabled: false), this
+    # is a cheap pre-query-only re-run. We don't pre-compute output_path here
+    # because the destination depends on whether a full results file already
+    # exists for this spec — handled at write time below.
+    pre_query_only = not spec.queries.query.enabled
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Collect every (model, topic) block in memory and write once at the end.
     # With v1.0 spec sizes this is cheap; for much larger evals you'd want
@@ -206,24 +210,30 @@ def run_harness(spec, spec_path) -> Path:
             time.sleep(SLEEP_BETWEEN_RUNS)
 
             # --- Primary query, repeated N times ---
+            # Skipped entirely when the primary query is disabled — the
+            # pre-query-only path leaves runs empty and n at 0, then
+            # splices into the existing results file at write time.
             query_text = spec.queries.query.text.format(league=league, year=year)
             runs = []
-            for i in range(1, spec.runs + 1):
-                # Fresh message history each run — no context carried across runs.
-                # This is methodologically important for stability measurement.
-                messages = []
-                add_user_message(messages, query_text)
-                answer, stop_reason = chat(
-                    messages,
-                    model=model_name,
-                    system=query_system,
-                    temperature=spec.temperature,
-                    web_search=spec.queries.query.web_search,
-                )
-                runs.append({"run": i, "answer": answer, "stop_reason": stop_reason})
-                print(f"  Run {i}/{spec.runs} done")
-                if i < spec.runs:
-                    time.sleep(SLEEP_BETWEEN_RUNS)
+            if not pre_query_only:
+                for i in range(1, spec.runs + 1):
+                    # Fresh message history each run — no context carried across runs.
+                    # This is methodologically important for stability measurement.
+                    messages = []
+                    add_user_message(messages, query_text)
+                    answer, stop_reason = chat(
+                        messages,
+                        model=model_name,
+                        system=query_system,
+                        temperature=spec.temperature,
+                        web_search=spec.queries.query.web_search,
+                    )
+                    runs.append({"run": i, "answer": answer, "stop_reason": stop_reason})
+                    print(f"  Run {i}/{spec.runs} done")
+                    if i < spec.runs:
+                        time.sleep(SLEEP_BETWEEN_RUNS)
+            else:
+                print("  Primary query disabled (queries.query.enabled: false) — skipping runs")
 
             # Capture this (model, topic) block in the results list.
             results.append({
@@ -234,7 +244,7 @@ def run_harness(spec, spec_path) -> Path:
                 "pre_answer": pre_answer,
                 "pre_stop_reason": pre_stop_reason,
                 "query": query_text,
-                "n": spec.runs,
+                "n": 0 if pre_query_only else spec.runs,
                 "runs": runs,
             })
 
@@ -245,6 +255,68 @@ def run_harness(spec, spec_path) -> Path:
         # Pause between models.
         if model_idx < len(spec.models) - 1:
             time.sleep(SLEEP_BETWEEN_MODELS)
+
+    # Write path depends on whether this was a pre-query-only re-run.
+    #
+    # Full run: write a fresh results file at <spec_stem>.json (overwriting
+    # any prior version) — the standard behavior.
+    #
+    # Pre-query-only: splice the fresh pre-queries into the existing results
+    # file at <spec_stem>.json, preserving the (expensive) primary-query runs
+    # already there. If that file does not yet exist, fall back to writing a
+    # standalone <spec_stem>_prequery.json so the work is not lost.
+    target_path = output_dir / (Path(spec_path).stem + ".json")
+
+    if pre_query_only and target_path.exists():
+        # Splice fresh pre-queries into the existing full results file.
+        with open(target_path) as f:
+            existing = json.load(f)
+
+        # Index fresh results by (model, league, year) for O(1) lookup.
+        fresh_idx = {
+            (r["model"], r["league"], r["year"]): r for r in results
+        }
+        existing_keys = {
+            (e["model"], e["league"], e["year"]) for e in existing.get("results", [])
+        }
+
+        updated = 0
+        for e in existing.get("results", []):
+            key = (e["model"], e["league"], e["year"])
+            src = fresh_idx.get(key)
+            if src is None:
+                continue  # entry not touched by this re-run; leave as-is
+            e["pre_query"] = src["pre_query"]
+            e["pre_answer"] = src["pre_answer"]
+            e["pre_stop_reason"] = src["pre_stop_reason"]
+            updated += 1
+
+        unmatched = sorted(k for k in fresh_idx if k not in existing_keys)
+        for k in unmatched:
+            print(f"  WARNING: fresh pre-query for {k} has no entry in "
+                  f"{target_path.name} — skipped (add the topic and re-run full)")
+
+        # Provenance breadcrumb. The grader and plotter ignore unknown
+        # top-level keys, so this is non-breaking.
+        existing["pre_query_refreshed_date"] = str(date.today())
+
+        with open(target_path, "w") as f:
+            json.dump(existing, f, indent=2)
+
+        print(f"\nRefreshed {updated} pre-query block(s) in {target_path.name}; "
+              f"{len(unmatched)} unmatched.")
+        return target_path
+
+    if pre_query_only:
+        # No existing target — fall back to a standalone file so the work
+        # isn't lost. User can later splice manually via `main.py splice`
+        # or run the full pipeline once and re-run pre-query-only after.
+        fallback_path = output_dir / (Path(spec_path).stem + "_prequery.json")
+        print(f"\nNote: no existing full results file at {target_path.name} — "
+              f"writing standalone {fallback_path.name} instead.")
+        output_path = fallback_path
+    else:
+        output_path = target_path
 
     # Wrap per-(model, topic) results with spec-level metadata so a reader
     # of the output file can tell what produced it without cross-referencing.

@@ -141,52 +141,68 @@ def cmd_collect(args: argparse.Namespace) -> None:
 
 def cmd_plot(args: argparse.Namespace) -> None:
     """
-    Combined plots: merge all *_graded.json files in a directory and generate
-    a single set of plots with every model's data overlaid on the same axes.
+    Combined plots: merge *_graded.json files in a directory and emit a
+    separate combined plot set per grader kind.
 
-    No API calls are made and nothing is re-graded. The command:
-      1. Finds every *_graded.json in results_dir (skipping combined_graded.json
-         itself so re-running doesn't double-count).
-      2. Merges their results arrays into combined_graded.json.
-      3. Generates three plots prefixed with 'combined_' so they sit alongside
-         the single-model plots without overwriting them.
+    Why per-kind: the numeric and structured graders both populate a field
+    called pre_query_answered, but with different semantics — numeric uses
+    a free-text score regex, structured uses strict SCORE-field commitment.
+    Mixing them on one axis is silently misleading. Splitting by grader
+    kind also lets the structured group keep its 4-plot output rather than
+    being downgraded to the numeric 3-plot view.
+
+    Files are grouped by their top-level `grader_kind` field (absent ⇒
+    numeric, "structured" ⇒ structured). For each non-empty group a
+    combined_<kind>_graded.json is written and the matching plotter is
+    invoked (numeric: 3 plots, structured: 4 plots). Any combined_*_graded.json
+    already in the directory is excluded from inputs so re-runs don't fold
+    prior combined outputs back in.
+
+    Note: any stale `combined_graded.json` from the pre-split version of this
+    command is now ignored on input but left on disk — delete it manually.
     """
     results_dir = Path(args.results_dir)
     if not results_dir.exists():
         sys.exit(f"Error: results directory not found: {results_dir}")
 
-    combined_filename = "combined_graded.json"
-    # Collect all per-model graded files, excluding the combined output itself
-    # so re-running the command doesn't fold last run's combined data back in.
     graded_files = sorted(
         p for p in results_dir.glob("*_graded.json")
-        if p.name != combined_filename
+        if not p.name.startswith("combined_")
     )
-
     if not graded_files:
         sys.exit(f"No *_graded.json files found in {results_dir}")
 
-    # Merge the results arrays from every graded file into a single list.
+    # Group inputs by grader_kind. Numeric grader doesn't write the field,
+    # so treat a missing key as numeric.
+    groups: dict[str, list] = {}
     print(f"Combining {len(graded_files)} graded file(s):")
-    combined_results = []
     for p in graded_files:
-        print(f"  {p.name}")
         with open(p) as f:
-            combined_results.extend(json.load(f)["results"])
+            data = json.load(f)
+        kind = data.get("grader_kind") or "numeric"
+        groups.setdefault(kind, []).append((p, data.get("results", [])))
+        print(f"  [{kind}] {p.name}")
 
-    # Write the merged data so generate_plots has a file to read from.
-    combined_path = results_dir / combined_filename
-    with open(combined_path, "w") as f:
-        json.dump({"spec_name": "combined", "results": combined_results}, f, indent=2)
-    print(f"Combined graded data written → {combined_path}")
+    # Per group: write a combined file and call the right plotter.
+    for kind in sorted(groups):
+        combined_results = []
+        for _p, rs in groups[kind]:
+            combined_results.extend(rs)
 
-    # Use a minimal stand-in spec — generate_plots only needs spec.name for
-    # plot titles; everything else comes from the graded JSON.
-    print("Generating combined plots...")
-    spec = SimpleNamespace(name="All Models")
-    plot_paths = generate_plots(combined_path, spec)
-    for p in plot_paths:
-        print(f"  Wrote {p}")
+        combined_path = results_dir / f"combined_{kind}_graded.json"
+        payload = {"spec_name": f"combined-{kind}", "results": combined_results}
+        if kind != "numeric":
+            payload["grader_kind"] = kind   # round-trip for downstream readers
+        with open(combined_path, "w") as f:
+            json.dump(payload, f, indent=2)
+        print(f"\nCombined {kind} graded data written → {combined_path}")
+
+        # Stand-in spec — both plotters only need spec.name for titles.
+        spec_min = SimpleNamespace(name=f"All Models ({kind})")
+        plot_fn = plots_structured if kind == "structured" else generate_plots
+        print(f"Generating {kind} combined plots...")
+        for pp in plot_fn(combined_path, spec_min):
+            print(f"  Wrote {pp}")
 
 
 def cmd_grade(args: argparse.Namespace) -> None:
@@ -216,7 +232,81 @@ def cmd_grade(args: argparse.Namespace) -> None:
         print(f"  Wrote {p}")
 
 
-# --- CLI setup --------------------------
+def cmd_splice(args: argparse.Namespace) -> None:
+    """
+    Splice the pre-query section of a pre-query-only re-run into a full
+    results file, keeping the (expensive) primary-query runs from the full
+    file untouched. No API calls are made.
+
+    Workflow this supports: re-run only the pre-query with an updated prompt
+    (a spec with `queries.query.enabled: false`, which writes a cheap
+    *_prequery.json), then fold those fresh pre-queries back into the
+    original full results file so it reads as if everything was run together.
+
+    Join key is (model, league, year). For each base entry, the pre_query,
+    pre_answer, and pre_stop_reason fields are overwritten from the matching
+    pre-query entry; everything else (query, n, runs, metadata) is preserved.
+    Mismatches in either direction are reported, not silently dropped.
+
+    Output is non-destructive by default (writes <base>_spliced.json). Pass
+    --in-place to overwrite the base file, or --out to name the target.
+    """
+    base_path = Path(args.base_path)
+    prequery_path = Path(args.prequery_path)
+    for p in (base_path, prequery_path):
+        if not p.exists():
+            sys.exit(f"Error: file not found: {p}")
+
+    with open(base_path) as f:
+        base = json.load(f)
+    with open(prequery_path) as f:
+        pre = json.load(f)
+
+    # Index the pre-query file by join key for O(1) lookup.
+    pre_index = {
+        (e["model"], e["league"], e["year"]): e for e in pre["results"]
+    }
+    base_keys = {
+        (e["model"], e["league"], e["year"]) for e in base["results"]
+    }
+
+    updated = 0
+    unchanged = 0
+    for e in base["results"]:
+        key = (e["model"], e["league"], e["year"])
+        src = pre_index.get(key)
+        if src is None:
+            unchanged += 1
+            print(f"  WARNING: no pre-query for {key} — base entry left unchanged")
+            continue
+        e["pre_query"] = src["pre_query"]
+        e["pre_answer"] = src["pre_answer"]
+        e["pre_stop_reason"] = src.get("pre_stop_reason")
+        updated += 1
+
+    # Surface pre-query entries that had no home in the base file — usually a
+    # sign the two files came from different specs or topic lists.
+    extra = sorted(k for k in pre_index if k not in base_keys)
+    for k in extra:
+        print(f"  WARNING: pre-query entry {k} not found in base — ignored")
+
+    # Provenance breadcrumb. The grader and plotter ignore unknown top-level
+    # keys, so this is non-breaking; delete it if you need byte-identical output.
+    base["pre_query_spliced_from"] = prequery_path.name
+
+    if args.in_place:
+        out_path = base_path
+    elif args.out:
+        out_path = Path(args.out)
+    else:
+        out_path = base_path.with_name(base_path.stem + "_spliced" + base_path.suffix)
+
+    with open(out_path, "w") as f:
+        json.dump(base, f, indent=2)
+
+    print(f"Spliced {updated} pre-query block(s); {unchanged} base entries unchanged; "
+          f"{len(extra)} extra pre-query entries ignored.")
+    print(f"Written → {out_path}")
 
 def build_parser() -> argparse.ArgumentParser:
     """
@@ -279,6 +369,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory containing *_graded.json files (default: results/).",
     )
 
+    # --- `splice` subcommand ---
+    # Fold a pre-query-only re-run back into a full results file. No API calls.
+    splice_parser = subparsers.add_parser(
+        "splice",
+        help="Overwrite the pre-query section of a full results file from a "
+             "pre-query-only (*_prequery.json) re-run, keeping its runs.",
+    )
+    splice_parser.add_argument(
+        "base_path",
+        help="Full results JSON whose primary-query runs are kept.",
+    )
+    splice_parser.add_argument(
+        "prequery_path",
+        help="Pre-query-only results JSON (*_prequery.json) supplying fresh pre-queries.",
+    )
+    splice_parser.add_argument(
+        "--out",
+        default=None,
+        help="Output path (default: <base>_spliced.json).",
+    )
+    splice_parser.add_argument(
+        "--in-place",
+        action="store_true",
+        help="Overwrite base_path in place instead of writing a new file.",
+    )
+
     return parser
 
 
@@ -300,6 +416,7 @@ def main() -> None:
         "collect": cmd_collect,
         "grade":   cmd_grade,
         "plot":    cmd_plot,
+        "splice":  cmd_splice,
     }
 
     try:
