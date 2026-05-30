@@ -8,7 +8,7 @@
 # Run with:
 #   python main.py run specs/example_structured.yaml
 
-name: claude-haiku-4-5_structured LessWrong 
+name: claude-sonnet-4-5_structured LessWrong 
 
 version: "1.0"
 
@@ -20,7 +20,8 @@ description: >
   pre-query commit, vs Stability filtered to fully-answered pre-queries).
 
 models:
-  - claude-haiku-4-5
+#  - claude-haiku-4-5
+  - claude-sonnet-4-5
 #  - claude-sonnet-4-6
 #  - claude-opus-4-6
 #  - claude-opus-4-7
