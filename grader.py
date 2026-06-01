@@ -932,6 +932,7 @@ def generate_plots(graded_path, spec, output_dir=None):
     # setdefault(model, []).append(...) is the standard one-liner for
     # "group entries by key into a list".
     confidence_data = {}         # model → [(mean_confidence, mean_accuracy), ...]
+    confidence_filtered = {}     # same, but only pre_query_answered=True
     stability_data = {}          # model → [(stability, mean_accuracy), ...]
     stability_filtered = {}      # same, but only pre_query_answered=True
 
@@ -949,11 +950,12 @@ def generate_plots(graded_path, spec, output_dir=None):
             (s["stability_of_extracted"], s["mean_accuracy_of_extracted"])
         )
 
-        # Plot 3: same as plot 2, but only topics where pre_query passed.
-        # This is the "filtered" trend from your LessWrong post — the
-        # high-R² version that includes only topics in the model's
-        # training data coverage.
+        # Plots 3 & 4: same axes as plots 2 & 1 respectively, but only topics
+        # where pre_query passed — the "filtered" subset in training coverage.
         if s["pre_query_answered"]:
+            confidence_filtered.setdefault(model, []).append(
+                (s["mean_confidence"], s["mean_accuracy_of_extracted"])
+            )
             stability_filtered.setdefault(model, []).append(
                 (s["stability_of_extracted"], s["mean_accuracy_of_extracted"])
             )
@@ -1001,5 +1003,16 @@ def generate_plots(graded_path, spec, output_dir=None):
         plt=plt, np=np,
     )
     paths.append(p3)
+
+    p4 = output_dir / f"{file_prefix}_accuracy_vs_confidence_filtered.png"
+    _plot_scatter_with_trends(
+        confidence_filtered,
+        x_label="Mean stated confidence (%)",
+        y_label="Mean accuracy of extracted answers",
+        title=f"{eval_name}: Accuracy vs Confidence (pre_query_answered = True)",
+        output_path=p4,
+        plt=plt, np=np,
+    )
+    paths.append(p4)
 
     return paths

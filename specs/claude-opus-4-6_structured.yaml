@@ -108,7 +108,7 @@ queries:
     # Set enabled: false to skip the primary query entirely (cheap
     # pre-query-only re-run). Output is routed to <stem>_prequery.json so it
     # won't clobber a full run; recombine later with `python main.py splice`.
-    enabled: false
+    enabled: true
     text: >
       What was the total playing time in hours for the {league} in the
       season ending in {year}? Include post season playoffs, but don't

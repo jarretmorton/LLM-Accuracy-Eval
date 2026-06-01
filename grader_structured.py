@@ -517,12 +517,13 @@ def generate_plots(graded_path, spec, output_dir=None):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Four parallel dicts: model -> [(x, y), ...]. Each plot projects the
+    # Five parallel dicts: model -> [(x, y), ...]. Each plot projects the
     # same source entries onto different (x, y) pairs and/or filters.
     confidence_data = {}
+    confidence_partial = {}  # pre_query_partially_answered (loosest filter)
     stability_data = {}
-    stability_partial = {}  # pre_query_partially_answered (loosest filter)
-    stability_full = {}     # pre_query_fully_answered (strictest filter)
+    stability_partial = {}   # pre_query_partially_answered (loosest filter)
+    stability_full = {}      # pre_query_fully_answered (strictest filter)
 
     for entry in graded["results"]:
         model = entry["model"]
@@ -536,6 +537,9 @@ def generate_plots(graded_path, spec, output_dir=None):
         )
 
         if s["pre_query_partially_answered"]:
+            confidence_partial.setdefault(model, []).append(
+                (s["mean_confidence"], s["mean_accuracy_of_extracted"])
+            )
             stability_partial.setdefault(model, []).append(
                 (s["stability_of_extracted"], s["mean_accuracy_of_extracted"])
             )
@@ -591,5 +595,15 @@ def generate_plots(graded_path, spec, output_dir=None):
         output_path=p4, plt=plt, np=np,
     )
     paths.append(p4)
+
+    p5 = output_dir / f"{file_prefix}_accuracy_vs_confidence_partially_answered.png"
+    _plot_scatter_with_trends(
+        confidence_partial,
+        x_label="Mean stated confidence (%)",
+        y_label="Mean accuracy of extracted answers",
+        title=f"{eval_name}: Accuracy vs Confidence (pre-query partially answered)",
+        output_path=p5, plt=plt, np=np,
+    )
+    paths.append(p5)
 
     return paths
