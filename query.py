@@ -65,8 +65,8 @@ def chat(messages, model, system=None, temperature=1.0, stop_sequences=None, web
     """
     Send messages to the Claude API and return the response text.
 
-    Differences from the eval.py version:
-    - `model` is now a required parameter (no module-level global)
+    Notes:
+    - `model` is a required parameter (no module-level global)
     - `stop_sequences` defaults to None and is normalized to [] inside —
       avoids the classic Python mutable-default-argument bug where a
       shared list default leaks state across calls.

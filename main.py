@@ -1,12 +1,14 @@
 """
 llm-accuracy-eval — main entry point.
 
-Orchestrates three independent modules:
+Orchestrates the eval modules:
 
-    spec.py    — parses YAML eval specs into a typed config object
-    query.py   — runs the eval harness against the Claude API, writes raw results
-    grader.py  — reads raw results, computes accuracy/stability metrics, writes
-                 graded results and plots
+    spec.py              — parses YAML eval specs into a typed config object
+    query.py             — runs the eval harness against the Claude API, writes raw results
+    grader.py            — reads raw results, computes accuracy/stability metrics, writes
+                           graded results and plots (numeric grader)
+    grader_structured.py — alternate grader for system-prompted, terminal-block output,
+                           selected by `grader.type: structured`
 
 Each module is independently usable. This file chains them together based on
 the subcommand the user picks. Run `python main.py --help` for a full list.
@@ -39,13 +41,22 @@ grade   <results.json> <spec.yaml>
 
 plot    [results_dir]
     Combined plots — merges every *_graded.json in the given directory (default:
-    results/) and generates a single set of plots with all models overlaid.
-    Writes combined_graded.json and three combined_* PNG files to the same
-    directory. Does not call the API or re-grade anything.
+    results/), grouped by grader kind, and generates a combined plot set per
+    kind (numeric: 3 plots, structured: 4). Writes a combined_<kind>_graded.json
+    and the matching combined_* PNG files to the same directory. Does not call
+    the API or re-grade anything.
 
     Example:
         python main.py plot
         python main.py plot results/
+
+splice  <base.json> <prequery.json>
+    Fold a pre-query-only (*_prequery.json) re-run back into a full results
+    file, keeping the full file's primary-query runs untouched. No API calls.
+    Use --in-place or --out to control the destination. See docs/prequery_rerun.md.
+
+    Example:
+        python main.py splice results/foo.json results/foo_prequery.json --in-place
 """
 
 # --- Imports --------------------------
@@ -70,6 +81,8 @@ from grader_structured import (
 
 
 def _grade_results(results_path, spec):
+    # Only `structured` has its own grader. `exact`, `judge`, and `none` are
+    # not yet implemented and currently fall back to the numeric grader.
     if spec.grader.type == "structured":
         return grade_structured(results_path, spec)
     return grade_numeric(results_path, spec)
@@ -310,7 +323,7 @@ def cmd_splice(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     """
-    Construct the argparse parser with all four subcommands.
+    Construct the argparse parser with all five subcommands.
 
     Works like git: the subcommand name comes first, then its arguments.
     For example:
