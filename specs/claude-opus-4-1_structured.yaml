@@ -8,16 +8,17 @@
 # Run with:
 #   python main.py run specs/example_structured.yaml
 
-name: claude-opus-4-1_structured LessWrong 
+name: claude-opus-4-1_structured LessWrong
 
 version: "1.0"
 
 description: >
   Same sports-league topics as example.yaml, but with system prompts that
   enforce a strict terminal-block output format. The structured grader
-  parses the block directly and emits four plots
+  parses the block directly and emits five plots
   (Accuracy vs Confidence, vs Stability, vs Stability filtered to any
-  pre-query commit, vs Stability filtered to fully-answered pre-queries).
+  pre-query commit, vs Stability filtered to fully-answered pre-queries,
+  and vs Confidence filtered to any pre-query commit).
 
 models:
 #  - claude-haiku-4-5

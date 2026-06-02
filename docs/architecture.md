@@ -41,6 +41,7 @@ flowchart TD
     PL --> P1[accuracy vs confidence]
     PL --> P2[accuracy vs stability<br/>all topics]
     PL --> P3[accuracy vs stability<br/>filtered: pre_query_answered=True]
+    PL --> P4[accuracy vs confidence<br/>filtered: pre_query_answered=True]
 ```
 
 ## Components
@@ -50,11 +51,11 @@ flowchart TD
 | **Spec parser** | Load and validate a YAML eval spec. Enforces required fields, `temperature > 0`, presence of both pre-query and primary query. | Implemented |
 | **Driver** | Execute the spec: run coverage checks, run primary queries N times per topic, capture `stop_reason` per response, retry on transient rate-limit and overload errors, paced sleeps between calls. | Implemented (single-provider; no parallelism) |
 | **Grader — numeric** | Extract the model's committed numeric answer via a tiered scoring system (bold-with-label > bold or label-line > equals-sign > fallback) with rate-mention filtering and range-midpoint handling. Score accuracy against truth from the spec. | Implemented |
-| **Grader — structured** | Alternate path selected by `grader.type: structured`. System prompts (defined per-query in the spec) force the model under test to emit a fixed `=== ANSWER ===` terminal block, which `grader_structured.py` parses directly — no extraction heuristics. Emits four plots instead of three. See [`docs/system_prompts.md`](system_prompts.md). | Implemented |
+| **Grader — structured** | Alternate path selected by `grader.type: structured`. System prompts (defined per-query in the spec) force the model under test to emit a fixed `=== ANSWER ===` terminal block, which `grader_structured.py` parses directly — no extraction heuristics. Emits five plots instead of four. See [`docs/system_prompts.md`](system_prompts.md). | Implemented |
 | **Grader — exact / judge** | String-match and LLM-as-judge graders for non-numeric answers. Not yet implemented; specs requesting them currently fall back to the numeric grader. | Planned |
 | **Truncation detection** | Classify each response as truncated via `stop_reason == "max_tokens"` (definitive) or, for legacy data, a text heuristic over the final characters. Truncated runs have their extracted value forced to `None`. | Implemented |
 | **Metrics** | Mean accuracy of extracted runs; stability as `1 − stdev/mean` of extracted values (≥2 valid runs required); mean confidence across runs that produced both an answer and a percentage. | Implemented |
-| **Reporter** | Emit a single JSON file per eval session containing per-run responses, per-topic summary, and three accuracy plots (vs confidence, vs stability, vs stability filtered to `pre_query_answered=True`). | Implemented |
+| **Reporter** | Emit a single JSON file per eval session containing per-run responses, per-topic summary, and four accuracy plots (vs confidence, vs stability, vs stability filtered to `pre_query_answered=True`, and vs confidence filtered to `pre_query_answered=True`). | Implemented |
 
 ## Spec format
 

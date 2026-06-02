@@ -63,7 +63,7 @@ Public API mirrors grader.py:
     grade_results(results_path, spec) -> Path
     generate_plots(graded_path, spec) -> list[Path]
 
-generate_plots emits four plots; shared scatter helper imported from grader.py.
+generate_plots emits five plots; shared scatter helper imported from grader.py.
 """
 
 # --- Imports --------------------------
@@ -478,7 +478,7 @@ def grade_results(results_path, spec) -> Path:
 
 def generate_plots(graded_path, spec, output_dir=None):
     """
-    Generate four accuracy plots from a structured-grader graded results file.
+    Generate five accuracy plots from a structured-grader graded results file.
 
     Plots:
       1. accuracy_vs_confidence                       — no filter
@@ -488,6 +488,8 @@ def generate_plots(graded_path, spec, output_dir=None):
                                                         in free text)
       4. accuracy_vs_stability_fully_answered         — filter: pre_query_fully_answered
                                                         (teams AND score field)
+      5. accuracy_vs_confidence_partially_answered    — filter: pre_query_partially_answered
+                                                        (confidence-axis counterpart of plot 3)
 
     Plot 4's data is a strict subset of plot 3's. Plot 4 is semantically what
     grader.py's existing _filtered plot computes (a committed score implies

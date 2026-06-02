@@ -18,7 +18,8 @@ Available commands
 run     <spec.yaml>
     Full pipeline: load spec → call API → grade → plot.
     Most common entry point. Produces a raw results JSON, a graded JSON, and
-    three accuracy plots, all named after the spec file.
+    accuracy plots (four for the numeric grader, five for the structured
+    grader), all named after the spec file.
 
     Example:
         python main.py run specs/claude-sonnet-4-6.yaml
@@ -42,7 +43,7 @@ grade   <results.json> <spec.yaml>
 plot    [results_dir]
     Combined plots — merges every *_graded.json in the given directory (default:
     results/), grouped by grader kind, and generates a combined plot set per
-    kind (numeric: 3 plots, structured: 4). Writes a combined_<kind>_graded.json
+    kind (numeric: 4 plots, structured: 5). Writes a combined_<kind>_graded.json
     and the matching combined_* PNG files to the same directory. Does not call
     the API or re-grade anything.
 
@@ -104,8 +105,9 @@ def cmd_run(args: argparse.Namespace) -> None:
     """
     Full pipeline: load spec → call API → grade → generate plots.
 
-    Most common entry point. Produces three output files all named after the
-    spec: a raw results JSON, a graded JSON, and three accuracy PNG plots.
+    Most common entry point. Produces output files all named after the spec:
+    a raw results JSON, a graded JSON, and accuracy PNG plots (four for the
+    numeric grader, five for the structured grader).
     This is the expensive path — it makes live API calls and waits for
     rate-limit cooldowns between runs.
     """
@@ -128,7 +130,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     graded_path = _grade_results(results_path, spec)
     print(f"Graded results written → {graded_path}")
 
-    # Step 4: Generate the three accuracy plots alongside the graded file.
+    # Step 4: Generate the accuracy plots alongside the graded file.
     print("Generating plots...")
     plot_paths = _generate_plots(graded_path, spec)
     for p in plot_paths:
@@ -161,13 +163,13 @@ def cmd_plot(args: argparse.Namespace) -> None:
     called pre_query_answered, but with different semantics — numeric uses
     a free-text score regex, structured uses strict SCORE-field commitment.
     Mixing them on one axis is silently misleading. Splitting by grader
-    kind also lets the structured group keep its 4-plot output rather than
-    being downgraded to the numeric 3-plot view.
+    kind also lets the structured group keep its 5-plot output rather than
+    being downgraded to the numeric 4-plot view.
 
     Files are grouped by their top-level `grader_kind` field (absent ⇒
     numeric, "structured" ⇒ structured). For each non-empty group a
     combined_<kind>_graded.json is written and the matching plotter is
-    invoked (numeric: 3 plots, structured: 4 plots). Any combined_*_graded.json
+    invoked (numeric: 4 plots, structured: 5 plots). Any combined_*_graded.json
     already in the directory is excluded from inputs so re-runs don't fold
     prior combined outputs back in.
 

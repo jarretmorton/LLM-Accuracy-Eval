@@ -885,12 +885,14 @@ def _plot_scatter_with_trends(data_by_model, x_label, y_label, title, output_pat
 
 def generate_plots(graded_path, spec, output_dir=None):
     """
-    Generate three accuracy plots from a graded results file.
+    Generate four accuracy plots from a graded results file.
 
     Plots:
       1. accuracy_vs_confidence.png             — mean_accuracy vs mean_confidence
       2. accuracy_vs_stability.png              — mean_accuracy vs stability (all)
       3. accuracy_vs_stability_filtered.png     — mean_accuracy vs stability,
+                                                   pre_query_answered=True only
+      4. accuracy_vs_confidence_filtered.png    — mean_accuracy vs mean_confidence,
                                                    pre_query_answered=True only
 
     Each plot has:
@@ -911,7 +913,7 @@ def generate_plots(graded_path, spec, output_dir=None):
     Returns
     -------
     list[Path]
-        Paths to the three generated plots in the listed order.
+        Paths to the four generated plots in the listed order.
     """
     # Lazy-load plotting deps and grab references to pass through to helpers.
     plt, np = _ensure_plotting_deps()
@@ -960,7 +962,7 @@ def generate_plots(graded_path, spec, output_dir=None):
                 (s["stability_of_extracted"], s["mean_accuracy_of_extracted"])
             )
 
-    # Generate the three plots. eval_name in the title makes each plot
+    # Generate the four plots. eval_name in the title makes each plot
     # self-identifying when viewed in isolation.
     eval_name = spec.name
     paths = []
