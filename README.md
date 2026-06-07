@@ -26,6 +26,11 @@ A small Python package that:
 
 See [`docs/architecture.md`](docs/architecture.md) for the design, [`docs/system_prompts.md`](docs/system_prompts.md) for prompt design, and [`specs/example.yaml`](specs/example.yaml) for the eval format.
 
+Example pre-filtered results:
+![Alt text](combined_structured_accuracy_vs_stability.png)
+Example filtered results:
+![Alt text](combined_structured_accuracy_vs_stability_partially_answered.png)
+
 ## What this is not
 
 Not a benchmark. Not a leaderboard. Not a replacement for HELM or lm-eval-harness. This is a focused harness for the specific evaluation pattern from the LessWrong post.
