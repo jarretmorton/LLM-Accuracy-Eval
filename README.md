@@ -32,8 +32,6 @@ Not a benchmark. Not a leaderboard. Not a replacement for HELM or lm-eval-harnes
 
 ## Status
 
-v0.1 — bare driver and grader implemented; YAML-spec layer and coverage-check step deferred.
-
 v1.0 - fully functional system. YAML spec input, JSON and plot output comparing directly to lesswrong findings.
 
 ## License
