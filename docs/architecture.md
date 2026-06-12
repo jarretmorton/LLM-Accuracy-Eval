@@ -64,12 +64,12 @@ A spec is a YAML file describing one eval run. The minimum useful spec has:
 - `models` — list of model strings to run against (e.g. `claude-haiku-4-5`).
 - `topics` — list of topic objects, each with `league`, `year`, and `truth`. Both queries (pre-query and primary) are defined once at the top level under `queries:` and templated with `{league}` and `{year}`; the pre-query is required.
 - `runs` — N, the number of times to run the primary query per topic per model. Required.
-- `temperature` — sampling temperature. Validated as `> 0` at spec-load time. Defaults to 1.0 to match claude.ai's apparent default per third-party measurement; the original LessWrong study used claude.ai. Setting this to 0 defeats the point of the harness — stability at temperature 0 is trivially high and uninformative.
+- `temperature` — sampling temperature. Required (the spec parser provides no default), validated as `> 0` at spec-load time. The shipped specs use 1.0 to match claude.ai's apparent default per third-party measurement; the original LessWrong study used claude.ai. Setting this to 0 defeats the point of the harness — stability at temperature 0 is trivially high and uninformative.
 - `grader` — `exact`, `numeric`, `judge`, `none`, or `structured`, plus `expected_unit` and `refusal_patterns`. The `structured` path additionally reads per-query `system_prompt` fields and an optional `soft_token_budget`; see [`docs/system_prompts.md`](system_prompts.md).
 
 The runner records `stop_reason` from the API on every response (both pre-query and primary) starting in v1.0. Older raw files predating this don't carry the field; the grader falls back to a text heuristic for those.
 
-See [`specs/example.yaml`](../specs/example.yaml).
+See [`specs/Examples/example.yaml`](../specs/Examples/example.yaml).
 
 ## Open questions
 

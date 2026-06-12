@@ -3,7 +3,7 @@
 # This spec reproduces a slice of the accuracy investigation from the
 # LessWrong post the harness is built around. Run it with:
 #
-#   llm-accuracy-eval run specs/example.yaml
+#   python main.py run specs/Unstructured/claude-sonnet-4-6.yaml
 #
 # The spec is intentionally small. The goal is to demonstrate the format,
 # and make adding additional new models simple (not to reproduce the full 640-query result).
@@ -13,7 +13,7 @@ name: claude-sonnet-4-6 LessWrong validation
 version: "1.0"
 
 description: >
-  Eight sports-league topics, two models, five runs each. Each topic includes a coverage_check (simple factual question with web search disabled) that indicates if the topic is in the training data, followed by a more complex question and a confidence assessment.
+  Sports-league topics run against one or more models, several runs each. Each topic includes a coverage_check (simple factual question with web search disabled) that indicates if the topic is in the training data, followed by a more complex question and a confidence assessment.
 
 # Models to run against. Strings are passed verbatim to the provider.
 models:
@@ -31,11 +31,15 @@ runs: 5
 temperature: 1.0
 
 # Grader:
-#   type: exact | numeric | judge | none.
+#   type: exact | numeric | judge | none | structured.
 #     exact   — string equality with ground_truth (case-insensitive, whitespace-trimmed).
 #     numeric — regex extraction with unit awareness; accuracy = 1 - |x - truth| / truth.
 #     judge   — LLM-as-judge call; requires judge_model.
 #     none    — measure stability only; do not compute accuracy.
+#     structured — parses a fixed '=== ANSWER ===' terminal block enforced via
+#                  system prompts (see specs/Examples/example_structured.yaml).
+#   Note: only numeric and structured are implemented; exact, judge, and none
+#   currently fall back to the numeric grader.
 #   expected unit: defines what units to look for, helps find the answer
 #   refusal patterns: Phrases that indicate the model couldn't answer — extend this list as new patterns are observed
 
@@ -84,7 +88,8 @@ queries:
       What was the total playing time in hours for the {league} in the season ending in {year}? Include post season playoffs, but don't include any overtime. What is your confidence in this answer 0% to 100%?
     web_search: true
 
-# Output destination. JSON, one file per eval session.
+# Output destination. Only the directory is used; the output filename is
+# derived from this spec file's stem. JSON, one file per eval session.
 output:
-  path: results/example.json
+  path: results/claude-sonnet-4-6.json
   format: json

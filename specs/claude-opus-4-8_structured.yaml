@@ -6,7 +6,7 @@
 # scoring tables, no range midpoint inference, no refusal pattern matching.
 #
 # Run with:
-#   python main.py run specs/example_structured.yaml
+#   python main.py run specs/claude-opus-4-8_structured.yaml
 
 name: claude-opus-4-8_structured LessWrong
 
@@ -108,8 +108,10 @@ queries:
 
   query:
     # Set enabled: false to skip the primary query entirely (cheap
-    # pre-query-only re-run). Output is routed to <stem>_prequery.json so it
-    # won't clobber a full run; recombine later with `python main.py splice`.
+    # pre-query-only re-run). Fresh pre-queries are spliced in place into the
+    # existing <stem>.json results file if one exists; otherwise a standalone
+    # <stem>_prequery.json is written (combine later with `python main.py
+    # splice`). See docs/prequery_rerun.md.
     enabled: true
     text: >
       What was the total playing time in hours for the {league} in the
@@ -146,5 +148,5 @@ queries:
         shorten the reasoning and emit the terminal block immediately.
 
 output:
-  path: results/example_structured.json
+  path: results/claude-opus-4-8_structured.json
   format: json

@@ -13,6 +13,8 @@
 
 The harness sends `system=None` to the model under test. The LessWrong methodology this harness implements was originally run via claude.ai, which does not expose a system prompt to users. Sending a system prompt from the harness would push the API call away from that baseline.
 
+Note this is a spec convention, not something the code enforces per grader type: `query.py` sends `queries.*.system_prompt` whenever the spec defines one, regardless of `grader.type`. To stay on the LessWrong baseline, simply omit the `system_prompt` fields in numeric-grader specs (as the shipped non-structured specs do).
+
 ### Structured path
 
 When a spec sets `grader.type: structured`, system prompts are defined per query under `queries.pre_query.system_prompt` and `queries.query.system_prompt` in the YAML spec. They are substituted with `{league}`, `{year}`, `{soft_token_budget}`, and `{expected_unit}` at runtime and sent via the existing `system=` parameter of `chat()`.
@@ -126,17 +128,17 @@ Three nested filters, in increasing strictness:
 
 | Boolean                          | Definition                                                                                                                            | Used by                |
 |----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|------------------------|
-| `pre_query_partially_answered`   | `teams_identified` **or** `score_provided` **or** `has_score(text)` matches in the response (suppressed under truncation).            | Plot 3                 |
+| `pre_query_partially_answered`   | `teams_identified` **or** `score_provided` **or** `has_score(text)` matches in the response (suppressed under truncation).            | Plots 3 & 5            |
 | `pre_query_answered`             | `score_provided`: SCORE field parsed to int-int. Semantically aligned with the numeric grader's same field, but stricter (field commitment, not free-text regex). | Cross-grader analysis  |
 | `pre_query_fully_answered`       | `teams_identified` **and** `score_provided`: both teams non-UNKNOWN and SCORE parsed.                                                 | Plot 4                 |
 
 **Note on `pre_query_partially_answered`.** This is the loosest filter and uses the same `has_score` text-regex as the numeric grader, imported directly from `grader.py`. It catches hedged commitments like *"I think it was around 25-22"* in reasoning text even when the model set `SCORE: UNKNOWN`. The text scan is suppressed when `stop_reason == "max_tokens"`, mirroring the numeric grader's `(not pre_truncated) and has_score(...)` rule — a digit pair appearing mid-thought in a truncated response isn't a real commitment.
 
-**Note on `pre_query_answered`.** Field name kept in common with the numeric grader for cross-grader analysis. The semantics differ deliberately: numeric measures *intent loosely* (a score-shaped string anywhere in prose); structured measures *commitment strictly* (the model put it in the SCORE field). Combined plots (`main.py plot`) that mix graded outputs from both graders will therefore apply different filters under the same name. This is documented behavior, not a bug — the structured signal is intentionally more rigorous.
+**Note on `pre_query_answered`.** Field name kept in common with the numeric grader for cross-grader analysis. The semantics differ deliberately: numeric measures *intent loosely* (a score-shaped string anywhere in prose); structured measures *commitment strictly* (the model put it in the SCORE field). Because the semantics differ, `main.py plot` groups graded files by `grader_kind` and emits a separate combined plot set per kind rather than mixing the two filters on one axis. The shared field name exists for downstream cross-grader analysis, where the structured signal is intentionally more rigorous.
 
 #### Plot outputs
 
-`grader_structured.generate_plots()` emits **four** plots (vs. the numeric grader's three):
+`grader_structured.generate_plots()` emits **five** plots (vs. the numeric grader's four):
 
 | File suffix                                       | x-axis     | y-axis    | filter                              |
 |---------------------------------------------------|------------|-----------|-------------------------------------|
@@ -144,6 +146,7 @@ Three nested filters, in increasing strictness:
 | `_accuracy_vs_stability.png`                      | stability  | accuracy  | none                                |
 | `_accuracy_vs_stability_partially_answered.png`   | stability  | accuracy  | `pre_query_partially_answered`      |
 | `_accuracy_vs_stability_fully_answered.png`       | stability  | accuracy  | `pre_query_fully_answered`          |
+| `_accuracy_vs_confidence_partially_answered.png`  | confidence | accuracy  | `pre_query_partially_answered`      |
 
 Plot 4's data is a strict subset of plot 3's. Plot 4 is semantically equivalent to `grader.py`'s existing `_filtered` plot in practice (a committed score implies the teams were identifiable). Plot 3 is the looser filter — useful for testing whether weak commitment (hedged score in prose, or teams without score) correlates with stability/accuracy independently of strong commitment.
 
@@ -153,7 +156,7 @@ The shared scatter helper (`_plot_scatter_with_trends`) is imported from `grader
 
 ## Grader (LLM-as-judge)
 
-Used when a topic specifies `grader: judge` in the spec. The judge sees the primary query, the model's response, and the ground truth, and emits a binary verdict.
+Planned design for the spec-level `grader.type: judge` path. The judge grader is **not yet implemented** — specs requesting it currently fall back to the numeric grader (see [`docs/architecture.md`](architecture.md)). When implemented, the judge sees the primary query, the model's response, and the ground truth, and emits a binary verdict.
 
 ```
 You are grading a single response to a factual question for a research eval. You will be given a question, a candidate response, and a reference answer. Your job is to decide whether the candidate response correctly answers the question, using the reference answer as ground truth.
@@ -184,4 +187,4 @@ Do not output anything outside the JSON object.
 - **Agreement vs. correctness in the judge prompt.** The judge prompt above grades correctness against ground truth, not agreement between responses. The current methodology supports this directly — each run is graded against truth independently, and stability is derived from the per-run accuracies. The agreement-grading variant is not needed.
 - **Coverage-check refusal vs. in-the-wild refusal.** Tracked separately. The pre-query filter booleans (`pre_query_partially_answered`, `pre_query_answered`, `pre_query_fully_answered`) drive the stability/accuracy filtered plots. Per-run refusals during the primary query are sorted from truncation (by `stop_reason`) and from malformed output (by terminal-block presence), then excluded from the accuracy and stability calculations.
 - **Judge model independence.** When `grader: judge`, `judge_model` must not appear in `models`. Grading by a model in the same family as the model under test introduces a known bias. The spec validator will reject configurations that violate this rule; the README will document it.
-- **Structured vs. baseline divergence.** The structured path is not a drop-in replacement for the LessWrong reproduction — it is a different methodology. A future eval could run both paths against the same models and compare accuracy/stability characteristics directly, but the two should not be mixed within a single results set. `pre_query_answered` shares a name across graders for cross-grader comparison, but the semantics differ (numeric: free-text regex; structured: SCORE field commitment) — combined plots applied across mixed grader outputs will use whichever filter the field happens to evaluate to per file, which is the documented behavior.
+- **Structured vs. baseline divergence.** The structured path is not a drop-in replacement for the LessWrong reproduction — it is a different methodology. A future eval could run both paths against the same models and compare accuracy/stability characteristics directly, but the two should not be mixed within a single results set. `pre_query_answered` shares a name across graders for cross-grader comparison, but the semantics differ (numeric: free-text regex; structured: SCORE field commitment) — `main.py plot` therefore groups graded files by `grader_kind` and never combines the two on one axis.
