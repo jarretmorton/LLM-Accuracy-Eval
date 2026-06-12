@@ -8,10 +8,11 @@ import time
 from datetime import date
 from pathlib import Path
 
-# Auto-install the anthropic package if it's not already present.
+# Auto-install third-party packages if not already present.
 # Convenient for first-time users; safe to leave in for a research tool.
-if importlib.util.find_spec("anthropic") is None:
-    subprocess.run(["pip", "install", "anthropic"], check=True)
+for _pip_name, _module_name in (("anthropic", "anthropic"), ("python-dotenv", "dotenv")):
+    if importlib.util.find_spec(_module_name) is None:
+        subprocess.run(["pip", "install", _pip_name], check=True)
 
 # Third-party
 from dotenv import load_dotenv
@@ -86,21 +87,21 @@ def chat(messages, model, system=None, temperature=1.0, stop_sequences=None, web
         params["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
 
     # Retry with linear backoff on rate limit / overload.
-    # 60s, 120s, 180s, 240s, 300s — total max wait 15 minutes across 5 attempts.
+    # 60s, 120s, 180s, 240s between attempts — total max wait 10 minutes
+    # across 5 attempts; the final failure raises immediately, no sleep.
     for attempt in range(MAX_RETRIES):
         try:
             message = get_client().messages.create(**params)
             break
         except Exception as e:
-            if hasattr(e, "status_code") and e.status_code in (429, 529):
-                wait = 60 * (attempt + 1)
-                print(f"  API error {e.status_code} — retrying in {wait}s "
-                      f"(attempt {attempt + 1}/{MAX_RETRIES})")
-                time.sleep(wait)
-            else:
+            if not (hasattr(e, "status_code") and e.status_code in (429, 529)):
                 raise
-    else:
-        raise RuntimeError("Max retries exceeded")
+            if attempt + 1 == MAX_RETRIES:
+                raise RuntimeError("Max retries exceeded")
+            wait = 60 * (attempt + 1)
+            print(f"  API error {e.status_code} — retrying in {wait}s "
+                  f"(attempt {attempt + 1}/{MAX_RETRIES})")
+            time.sleep(wait)
 
     # Web-search responses may mix text and tool-use blocks; keep only text.
     text = " ".join(block.text for block in message.content if block.type == "text")
