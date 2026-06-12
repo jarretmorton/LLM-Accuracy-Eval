@@ -4,7 +4,7 @@
 
 LLM Accuracy Eval is the runnable companion to the LessWrong post [*A Black-Box Procedure for LLM Confidence in Critical Applications*](https://www.lesswrong.com/posts/unaLT4A6hSTCLNGod/a-black-box-procedure-for-llm-confidence-in-critical#comments). The post argued that for critical-application use of LLMs, two black-box signals are tractable and useful: (1) **training coverage**, estimated by asking secondary questions with web search disabled and observing whether the model refuses; and (2) **answer stability**, measured by running the same query repeatedly and comparing responses.
 
-This repo turns that procedure into a CLI and a YAML-spec-driven eval format. v1.0 is a functioning system allowing multiple runs and multiple models to be used over several topics. Includes functionality for identifying truncated replies, flagging refusals, and plotting the main outputs evaluated in the post above (confidence vs accuracy, stability vs accuracy, and filtered stability vs accuracy). The driver currently supports the Anthropic API only.
+This repo turns that procedure into a CLI and a YAML-spec-driven eval format. v1.0 is a functioning system allowing multiple runs and multiple models to be used over several topics. Includes functionality for identifying truncated replies, flagging refusals, and plotting the main outputs evaluated in the post above (accuracy vs confidence and accuracy vs stability, each with pre-query-filtered variants — four plots from the numeric grader, five from the structured grader). The driver currently supports the Anthropic API only.
 
 ## Thesis
 
@@ -24,12 +24,20 @@ A small Python package that:
 - Computes stability and accuracy metrics.
 - Emits structured JSON results for downstream analysis.
 
-See [`docs/architecture.md`](docs/architecture.md) for the design, [`docs/system_prompts.md`](docs/system_prompts.md) for prompt design, and [`specs/example.yaml`](specs/example.yaml) for the eval format.
+See [`docs/architecture.md`](docs/architecture.md) for the design, [`docs/system_prompts.md`](docs/system_prompts.md) for prompt design, and [`specs/Examples/example.yaml`](specs/Examples/example.yaml) for the eval format.
 
 Example pre-filtered results:
 ![Alt text](combined_structured_accuracy_vs_stability.png)
 Example filtered results:
 ![Alt text](combined_structured_accuracy_vs_stability_partially_answered.png)
+
+## Setup
+
+```bash
+pip install -r requirements.txt
+echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
+python main.py run specs/Examples/example.yaml
+```
 
 ## What this is not
 

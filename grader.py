@@ -718,7 +718,7 @@ def grade_results(results_path, spec) -> Path:
         if not s["all_runs_accounted_for"]:
             print(
                 f"    WARNING: runs_with_extraction + runs_with_refusals "
-                f"!= runs_graded"
+                f"+ runs_truncated != runs_graded"
             )
         graded_entries.append(graded_entry)
 

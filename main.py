@@ -22,7 +22,7 @@ run     <spec.yaml>
     grader), all named after the spec file.
 
     Example:
-        python main.py run specs/claude-sonnet-4-6.yaml
+        python main.py run specs/claude-sonnet-4-6_structured.yaml
 
 collect <spec.yaml>
     Harness only — calls the API and writes raw results but skips grading.
@@ -30,7 +30,7 @@ collect <spec.yaml>
     or capture results for later analysis.
 
     Example:
-        python main.py collect specs/claude-sonnet-4-6.yaml
+        python main.py collect specs/claude-sonnet-4-6_structured.yaml
 
 grade   <results.json> <spec.yaml>
     Grader only — no API calls. Reads an existing raw results file, computes
@@ -38,7 +38,7 @@ grade   <results.json> <spec.yaml>
     after changing the grader, or to verify someone else's numbers.
 
     Example:
-        python main.py grade results/claude-sonnet-4-6.json specs/claude-sonnet-4-6.yaml
+        python main.py grade results/claude-sonnet-4-6_structured.json specs/claude-sonnet-4-6_structured.yaml
 
 plot    [results_dir]
     Combined plots — merges every *_graded.json in the given directory (default:
@@ -69,7 +69,7 @@ from pathlib import Path            # object-oriented file paths
 from types import SimpleNamespace   # lightweight object used as a stand-in spec
                                     # for the `plot` command (needs only .name)
 
-# The three modules this file orchestrates. They don't know about each other —
+# The four modules this file orchestrates. They don't know about each other —
 # only main.py knows how to chain them.
 from spec import load_spec                        # load_spec(path) -> Spec
 from query import run_harness                     # run_harness(spec, spec_path) -> Path
@@ -118,7 +118,7 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     # Step 2: Run the harness. API calls + rate-limit sleeps happen here.
     # The output filename is derived from the spec filename, not spec.output.path,
-    # so claude-sonnet-4-6.yaml → results/claude-sonnet-4-6.json.
+    # so claude-sonnet-4-6_structured.yaml → results/claude-sonnet-4-6_structured.json.
     print(f"Running harness — {len(spec.models)} model(s), "
           f"{len(spec.topics)} topic(s), n={spec.runs}")
     results_path = run_harness(spec, args.spec_path)
@@ -329,7 +329,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     Works like git: the subcommand name comes first, then its arguments.
     For example:
-        python main.py run specs/claude-sonnet-4-6.yaml
+        python main.py run specs/claude-sonnet-4-6_structured.yaml
 
     Pulled into its own function so it's independently testable and easy
     to scan when adding new subcommands.
